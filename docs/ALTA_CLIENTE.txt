@@ -1,0 +1,94 @@
+# Magxor Engine — Alta de cliente nuevo (paso a paso, ~30 min)
+
+Guía para operador. Deploy en **Vercel**. El Sheet del cliente queda **privado** (Restringido): nunca se publica en la web.
+
+---
+
+## 1. Pedir al cliente (checklist)
+
+- [ ] Nombre de la tienda
+- [ ] WhatsApp minorista y mayorista (solo dígitos, ej. `5493584123456`)
+- [ ] Dirección, ciudad, horarios de atención
+- [ ] Logo PNG (512×512) + logo animado GIF/APNG/WebM (opcional, splash móvil)
+- [ ] Color primario HEX (ej. `#2563EB`) o preset (Azul/Cian/Esmeralda/Índigo/Rosa/Naranja)
+- [ ] Dominio final (ej. `https://tienda-cliente.com`)
+- [ ] Título + descripción SEO + palabras clave (o se generan por defecto)
+- [ ] Usuario admin inicial + clave fuerte + admin pass (config sensible)
+
+## 2. Backend: Sheet + Apps Script (10 min)
+
+1. Crear un Google Sheet nuevo (cuenta del operador o del cliente).
+2. `Extensiones > Apps Script` → borrar contenido → pegar `apps-script/Code.gs`.
+3. Ejecutar `setupMagxor()` (aceptar permisos). En `Registros` copiar el `READ_TOKEN`.
+4. Ejecutar `crearAdmin("usuario", "CLAVE_FUERTE", "ADMINPASS_FUERTE")`.
+5. `Implementar > Nueva implementación > Aplicación web`:
+   - Ejecutar como: **Yo** — Acceso: **Cualquiera** → copiar URL `/exec`.
+6. Si la tienda ya existía con Code.gs viejo: ejecutar `migrarSeguridad()` una vez (agrega columnas sin borrar datos).
+
+Hojas auto-creadas: `INVENTARIO | RESEÑAS | CLIENTES | PEDIDOS | DATOS | CREDENCIALES`.
+
+## 3. Frontend: deploy en Vercel (10 min)
+
+1. Subir este repo a GitHub → Vercel → **Add New Project** → framework **Vite** (build `npm run build`, output `dist`).
+2. En **Settings → Environment Variables** (Production + Preview):
+   - `VITE_APPS_SCRIPT_URL` = URL `/exec` del paso 2
+   - `VITE_READ_TOKEN` = token del paso 2
+   - `VITE_IMGBB_API_KEY` = key de https://api.imgbb.com
+   - `VITE_SITE_URL` = `https://dominio-cliente.com` (se usa para `sitemap.xml`/`robots.txt` en build)
+3. **Deploy**. El build genera `sitemap.xml` con los productos reales + `robots.txt`.
+4. **Domains**: agregar el dominio del cliente en Vercel y apuntar DNS.
+5. Cargar `SEO_URL_CANONICA` con el dominio final en la hoja `DATOS` → **Redeploy** (o esperar a que el canonical se hidrate en runtime).
+
+> `vercel.json` ya incluido (`cleanUrls`). Las deep-links `?p=` y las secciones por scroll no necesitan rewrites.
+
+## 4. Personalización desde la hoja DATOS
+
+Una sola fila con estas columnas (ver encabezados exactos en `Code.gs → DATOS_HEADERS`):
+
+| Columna | Efecto |
+|---|---|
+| `NOMBRE WEB`, `HORARIOS`, `DIRECCIÓN`, `CONTACTO MINORISTA/MAYORISTA/TICKET`, `ANUNCIO HEADER` | Marca y contacto |
+| `COLOR_PRESET` + `COLOR_PRIMARIO`/`COLOR_SECUNDARIO` (HEX) | Color de toda la tienda |
+| `LOGO_URL`, `FAVICON_URL`, `LOGO_ANIMADO_URL`, `SPLASH_ACTIVO`, `SPLASH_DURACION_MS`, `SPLASH_FONDO` | Logo, favicon, splash móvil |
+| `SEO_TITULO`, `SEO_DESCRIPCION`, `SEO_KEYWORDS`, `SEO_URL_CANONICA`, `SEO_ROBOTS` | Meta tags, OG/Twitter, favicon, JSON-LD |
+| `ESTADO_CUENTA` (`SI`/`ATRASO`/`NO`), `SUSPENSION_IMAGE_URL`, `SUSPENSION_MENSAJE` | Control maestro (ver §6) |
+| `MONEDA` | Moneda del JSON-LD de producto |
+
+## 5. Carga inicial de productos
+
+- `INVENTARIO`: `Id | Nombre de Producto | Categoría | Descripción | Precio | Precio Oferta | Disponible | Oferta | Fotos` (URLs; varias separadas por `,`/`;`/`|`).
+- Las fotos que subas desde Admin se convierten a **WebP** en el navegador antes de ImgBB (GIF/video se suben tal cual para no romper animación).
+- `RESEÑAS` opcional: `productId | name | rating | comment | date`.
+
+## 6. Control maestro de cuenta (operador)
+
+- `ESTADO_CUENTA = SI`: normal.
+- `= ATRASO`: tienda visible + banner "Pago pendiente"; admin entra con alerta persistente.
+- `= NO`: tienda y login suspendidos (muestra `SUSPENSION_IMAGE_URL` + mensaje); el endpoint rechaza pedidos/reseñas/clientes nuevos.
+- Admin pass (sección sensible del Admin): definir/rotar **solo** con `setAdminPass("usuario","NUEVA")` en Apps Script. Nunca pegar claves en claro en el Sheet.
+
+## 7. Verificación (checklist)
+
+- [ ] `POST /exec {action:"health"}` → `ok`
+- [ ] Catálogo carga productos y reseñas
+- [ ] Pedido de prueba llega a `PEDIDOS` + WhatsApp
+- [ ] Reseña y cliente de prueba llegan al Sheet
+- [ ] Login admin OK; sección sensible pide Admin pass
+- [ ] `/sitemap.xml` con `?p=` reales, `/robots.txt` con dominio
+- [ ] Título, descripción, OG:image y favicon = logo de `DATOS`
+- [ ] Probar `ESTADO_CUENTA = ATRASO` (banner) y volver a `SI`
+
+## 8. Entrega al cliente
+
+Entregar: URL tienda + usuario/clave admin + admin pass. **No entregar**: `READ_TOKEN` (queda en Vercel), salts/hashes, acceso al Apps Script salvo acuerdo. Exigir cambio de clave y admin pass en el primer ingreso.
+
+## 9. Troubleshooting
+
+| Síntoma | Causa probable | Fix |
+|---|---|---|
+| "Token de lectura inválido" | `VITE_READ_TOKEN` desactualizado | `rotarReadToken()` → actualizar env en Vercel → redeploy |
+| "Sesión expirada" | Pasaron 12h | Login de nuevo |
+| "Cuenta suspendida" | `ESTADO_CUENTA = NO` | Regularizar → volver a `SI` |
+| Catálogo vacío | `INVENTARIO` sin filas o endpoint sin desplegar | Cargar productos; revisar deployment `/exec` |
+| Imagen no sube | Falta `VITE_IMGBB_API_KEY` | Agregar env en Vercel → redeploy |
+| Sitemap con dominio ejemplo | Falta `VITE_SITE_URL` o `SEO_URL_CANONICA` | Setear y redeploy |

@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <!-- Magxor Engine: valores por defecto; se hidratan en runtime desde DATOS (título, descripción, logo, favicon) -->
+    <title>Magxor Engine — Tienda online</title>
+    <meta name="description" content="Catálogo online de Magxor Engine." />
+    <meta name="keywords" content="tienda online, catálogo, ofertas" />
+    <meta name="author" content="Magxor Engine" />
+    <meta name="robots" content="index, follow" />
+    <link rel="canonical" href="/" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Magxor Engine — Tienda online" />
+    <meta property="og:description" content="Catálogo online de Magxor Engine." />
+    <meta property="og:image" content="/logo.png" />
+    <meta property="og:url" content="/" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Magxor Engine — Tienda online" />
+    <meta name="twitter:description" content="Catálogo online de Magxor Engine." />
+    <meta name="twitter:image" content="/logo.png" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+
+    <link rel="icon" type="image/png" href="/logo.png" />
+    <link rel="apple-touch-icon" href="/logo.png" />
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#2563EB" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+
+    <script type="application/ld+json" data-mx="store-ld">
+      {
+        "@context": "https://schema.org",
+        "@type": "Store",
+        "name": "Magxor Engine",
+        "image": "/logo.png",
+        "url": "/"
+      }
+    </script>
+  </head>
+  <body class="bg-white dark:bg-neutral-900 transition-colors duration-300">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js').catch(err => {
+            console.log('SW registration skipped or failed: ', err);
+          });
+        });
+      }
+    </script>
+  </body>
+</html>

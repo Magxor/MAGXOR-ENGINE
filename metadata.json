@@ -1,0 +1,6 @@
+{
+  "name": "Magxor Engine",
+  "description": "Tienda virtual genérica Magxor Engine: catálogo, pedidos y reseñas gestionados desde Apps Script.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

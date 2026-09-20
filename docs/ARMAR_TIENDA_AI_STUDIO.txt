@@ -1,0 +1,253 @@
+================================================================
+MAGXOR ENGINE - COMO ARMAR UNA TIENDA EN GOOGLE AI STUDIO
+Paso a paso completo: que subir, que NO subir y como proceder
+================================================================
+
+Esta guia es para el OPERADOR (vos). El cliente final no hace nada
+de esto: solo te pasa sus datos y recibe la tienda lista.
+
+TIEMPO ESTIMADO: 30-45 minutos por tienda.
+
+
+----------------------------------------------------------------
+PASO 0 - LO QUE NECESITAS ANTES DE EMPEZAR
+----------------------------------------------------------------
+
+Cuentas:
+  1. Cuenta de Google (para el Sheet + Apps Script del cliente).
+  2. Cuenta en Google AI Studio (https://ai.studio).
+  3. Cuenta en Vercel (para el deploy final, si aplica).
+  4. API Key de ImgBB (https://api.imgbb.com) para subir fotos.
+
+Datos a pedirle al cliente (no avances sin esto):
+  [ ] Nombre de la tienda
+  [ ] WhatsApp minorista y mayorista (solo digitos, ej: 5493584123456)
+  [ ] Direccion, ciudad y horarios de atencion
+  [ ] Logo PNG (ideal 512x512) y logo animado GIF/APNG/WebM (opcional)
+  [ ] Color primario en HEX (ej: #2563EB) o un preset:
+      Azul / Cian / Esmeralda / Indigo / Rosa / Naranja
+  [ ] Dominio final (ej: https://tienda-cliente.com)
+  [ ] Titulo + descripcion SEO + palabras clave (o se usan por defecto)
+  [ ] Usuario admin inicial + clave fuerte + admin pass (config sensible)
+
+
+----------------------------------------------------------------
+PASO 1 - QUE SUBIR Y QUE NO SUBIR
+----------------------------------------------------------------
+
+A) CARPETAS QUE SI SE SUBEN (completas):
+  - src/ ................ Toda la tienda (componentes, lib/, estilos)
+  - public/ ............. logo.png, manifest.json, sw.js,
+                          robots.txt, sitemap.xml
+                          (robots y sitemap se regeneran en cada
+                          build, pero no molestan)
+  - apps-script/ ........ Code.gs + README_SETUP.md (el backend;
+                          AI Studio lo ignora para el build pero
+                          te sirve tenerlo a mano)
+  - docs/ ............... ALTA_CLIENTE.md y este archivo
+  - scripts/ ............ generate-sitemap.mjs (lo usa el build)
+
+B) ARCHIVOS SUELTOS DE LA RAIZ QUE SI SE SUBEN:
+  - index.html
+  - package.json
+  - package-lock.json
+  - vite.config.ts
+  - tsconfig.json
+  - vercel.json
+  - metadata.json
+  - .env.example
+  - .gitignore
+
+C) LO QUE NO SE SUBE NUNCA:
+  - node_modules/ ......... Se regenera con "npm install".
+                            Pesa cientos de MB, AI Studio lo
+                            reinstala solo. NO lo comprimas en el zip.
+  - dist/ ................. Es la salida del build, se regenera
+                            con "npm run build".
+  - assets/.aistudio/ ..... Metadata vieja de AI Studio, vacia.
+  - public/favicon.png.png  Duplicado sin uso (solo se usa /logo.png).
+  - .env.local o .env ..... Tienen tokens reales. NUNCA se suben.
+                            Las claves van en las variables de
+                            entorno de AI Studio / Vercel.
+
+D) COMO PREPARAR EL PAQUETE:
+  Opcion 1 (recomendada): subir el repo a GitHub privado e
+    importarlo desde AI Studio.
+  Opcion 2: armar un .zip SIN node_modules/ ni dist/ y
+    subirlo a AI Studio.
+
+
+----------------------------------------------------------------
+PASO 2 - BACKEND: SHEET + APPS SCRIPT (10 min)
+----------------------------------------------------------------
+
+El Sheet del cliente queda PRIVADO (Restringido). Nunca se
+publica en la web. Solo el script lo lee.
+
+  1. Crear un Google Sheet nuevo.
+  2. Extensiones > Apps Script > borrar el contenido >
+     pegar el archivo apps-script/Code.gs completo.
+  3. En el editor, ejecutar la funcion setupMagxor()
+     (aceptar permisos). Abrir "Registros" y copiar el READ_TOKEN.
+     Esto crea las 6 hojas automaticamente:
+       INVENTARIO | RESENAS | CLIENTES | PEDIDOS | DATOS | CREDENCIALES
+  4. Ejecutar en el editor:
+       crearAdmin("usuario", "CLAVE_FUERTE", "ADMINPASS_FUERTE")
+     Ese es el login del panel Admin + el admin pass de la
+     seccion sensible. Anotalos para entregar al cliente.
+  5. Implementar > Nueva implementacion > Aplicacion web:
+       - Ejecutar como: Yo
+       - Acceso: Cualquiera
+     Copiar la URL que termina en /exec.
+  6. Si la tienda ya existia con un Code.gs viejo: ejecutar
+     migrarSeguridad() una sola vez (agrega las columnas nuevas
+     sin borrar datos).
+
+Detalle completo en: apps-script/README_SETUP.md
+
+
+----------------------------------------------------------------
+PASO 3 - PROYECTO EN AI STUDIO
+----------------------------------------------------------------
+
+  1. Crear un proyecto nuevo en AI Studio (o importar el repo).
+  2. Subir los archivos del PASO 1 (zip limpio o GitHub).
+  3. Verificar que AI Studio detecte:
+       - package.json con scripts dev/build/preview
+       - index.html en la raiz
+       - carpeta src/ con main.tsx y App.tsx
+  4. Correr "npm install" si AI Studio no lo hace solo.
+  5. NO toques codigo para personalizar: todo sale de la hoja
+     DATOS (ver PASO 5).
+
+
+----------------------------------------------------------------
+PASO 4 - VARIABLES DE ENTORNO EN AI STUDIO
+----------------------------------------------------------------
+
+Cargarlas en el panel de Secrets / Environment del proyecto
+(valen para preview y produccion):
+
+  VITE_APPS_SCRIPT_URL = URL /exec del PASO 2 punto 5
+  VITE_READ_TOKEN ...... = READ_TOKEN del PASO 2 punto 3
+  VITE_IMGBB_API_KEY ... = key de https://api.imgbb.com
+  VITE_SITE_URL ........ = https://dominio-cliente.com
+                           (se usa para sitemap.xml y robots.txt)
+
+Que pasa si falta cada una:
+  - Sin VITE_APPS_SCRIPT_URL: la tienda carga vacia (sin
+    productos) y el login admin se niega por seguridad.
+  - Sin VITE_READ_TOKEN: el endpoint responde "Token de
+    lectura invalido", no hay catalogo.
+  - Sin VITE_IMGBB_API_KEY: no se pueden subir fotos desde
+    el Admin (da error claro en pantalla).
+  - Sin VITE_SITE_URL: el sitemap usa un dominio de ejemplo;
+    hay que setearlo y reconstruir.
+
+
+----------------------------------------------------------------
+PASO 5 - PERSONALIZACION POR CLIENTE (sin tocar codigo)
+----------------------------------------------------------------
+
+Todo se carga en la hoja DATOS (una sola fila). Columnas:
+
+  Marca y contacto:
+    NOMBRE WEB, HORARIOS, DIRECCION, CONTACTO MINORISTA,
+    CONTACTO MAYORISTA, CONTACTO TICKET, ANUNCIO HEADER
+
+  Color de la tienda:
+    COLOR_PRESET (Azul/Cian/Esmeralda/Indigo/Rosa/Naranja)
+    COLOR_PRIMARIO y COLOR_SECUNDARIO en HEX (mandan
+    sobre el preset si son validos)
+
+  Logo y splash movil:
+    LOGO_URL, FAVICON_URL, LOGO_ANIMADO_URL,
+    SPLASH_ACTIVO (SI/NO), SPLASH_DURACION_MS, SPLASH_FONDO
+
+  SEO (titulo, descripcion, keywords, OG/Twitter, favicon,
+  JSON-LD, canonical):
+    SEO_TITULO, SEO_DESCRIPCION, SEO_KEYWORDS,
+    SEO_URL_CANONICA, SEO_ROBOTS
+
+  Control maestro de cuenta:
+    ESTADO_CUENTA: SI (normal) | ATRASO (tienda visible +
+      aviso de pago, admin entra con alerta) | NO (tienda y
+      login suspendidos, muestra SUSPENSION_IMAGE_URL)
+    SUSPENSION_IMAGE_URL, SUSPENSION_MENSAJE
+
+  Otros: MONEDA
+
+Productos en INVENTARIO:
+  Id | Nombre de Producto | Categoria | Descripcion | Precio |
+  Precio Oferta | Disponible | Oferta | Fotos
+  (varias fotos separadas por coma, punto y coma o | )
+
+Fotos: las que subas desde el Admin se convierten a WebP
+en el navegador antes de ImgBB (GIF/video se suben tal cual
+para no romper la animacion del logo).
+
+Resenas (opcional) en RESENAS:
+  productId | name | rating | comment | date
+
+
+----------------------------------------------------------------
+PASO 6 - VERIFICACION FINAL (checklist)
+----------------------------------------------------------------
+
+  [ ] El build (npm run build) termina sin errores.
+  [ ] El catalogo muestra los productos del INVENTARIO.
+  [ ] Un pedido de prueba llega a la hoja PEDIDOS y a WhatsApp.
+  [ ] Una resena y un cliente de prueba llegan al Sheet.
+  [ ] El login admin funciona; la seccion sensible pide
+      el Admin pass (se verifica en servidor, nunca viaja
+      el hash al navegador).
+  [ ] /sitemap.xml trae los ?p= reales y /robots.txt el dominio.
+  [ ] Titulo, descripcion, OG:image y favicon = logo de DATOS.
+  [ ] Probar ESTADO_CUENTA = ATRASO (banner visible) y
+      volver a SI. Probar NO solo si el cliente lo pide.
+
+
+----------------------------------------------------------------
+PASO 7 - ENTREGA AL CLIENTE
+----------------------------------------------------------------
+
+Entregar UNICAMENTE:
+  - URL de la tienda
+  - Usuario + clave admin + admin pass
+  - Este recordatorio: pedirle que cambie clave y admin pass
+    en el primer ingreso.
+
+NO entregar:
+  - READ_TOKEN (queda en las env de AI Studio/Vercel)
+  - Hashes/salts ni acceso al Apps Script (salvo acuerdo)
+  - El paquete zip con node_modules o .env.local
+
+Seguridad: si un token o clave se expuso, ejecutar
+rotarReadToken() (y actualizar la env) o
+setAdminPass("usuario","NUEVA") / cambiarClave("usuario","NUEVA").
+
+
+----------------------------------------------------------------
+ERRORES TIPICOS
+----------------------------------------------------------------
+
+  "Token de lectura invalido" .... VITE_READ_TOKEN desactualizado.
+    Fix: rotarReadToken() > actualizar env > reconstruir.
+  "Sesion expirada" .............. Pasaron 12 hs. Fix: login de nuevo.
+  "Cuenta suspendida" ............ ESTADO_CUENTA = NO.
+    Fix: regularizar > volver a SI.
+  "Cuenta Pausada" ............... Columna ACTIVO del usuario != SI
+    en CREDENCIALES. Fix: poner SI.
+  "Admin pass incorrecto" ........ Verificar con setAdminPass().
+    Nunca pegar claves en claro en el Sheet.
+  Catalogo vacio ................. INVENTARIO sin filas o /exec
+    sin desplegar. Revisar deployment.
+  Imagen no sube ................. Falta VITE_IMGBB_API_KEY.
+  Sitemap con dominio de ejemplo .. Falta VITE_SITE_URL o
+    SEO_URL_CANONICA. Setear y reconstruir.
+  Sheet publicado en la web ...... Mal: debe estar Restringido.
+    El endpoint es el unico acceso.
+
+================================================================
+FIN - MAGXOR ENGINE
+================================================================
