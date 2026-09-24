@@ -39,7 +39,7 @@ import { REVIEWS, FAQS, LOCATIONS, WORK_HOURS } from "./data";
 import { Product, CartItem, ReviewItem } from "./types";
 import { checkShopStatus, parseCSV, mapRecordsToProducts, mapRecordsToReviews, submitToAppsScript, formatPrice } from "./utils";
 import { api, isEndpointConfigured, type MxConfig } from "./lib/api";
-import { applyTheme } from "./lib/theme";
+import { applyTheme, resolveEffectiveTheme, resolveTheme, buildPaletteOverrides } from "./lib/theme";
 import { applyStoreSeo, applyProductSeo, restoreProductSeo } from "./lib/seo";
 import Splash from "./components/Splash";
 import InstallPWA from "./components/InstallPWA";
@@ -75,61 +75,6 @@ function getGoogleSheetTabUrl(url: string, sheetName: string): string {
   }
   
   return url;
-}
-
-function getPaletteCSS(paletteName: string): string {
-  if (!paletteName) return "";
-  
-  let primaryRGB = "59, 130, 246"; // blue-500
-  let primaryHoverRGB = "37, 99, 235"; // blue-600
-  let primaryLightRGB = "96, 165, 250"; // blue-400
-  
-  if (paletteName.includes("Cian")) {
-    primaryRGB = "6, 182, 212"; // cyan-500
-    primaryHoverRGB = "8, 145, 178"; // cyan-600
-    primaryLightRGB = "34, 211, 238"; // cyan-400
-  } else if (paletteName.includes("Esmeralda")) {
-    primaryRGB = "16, 185, 129"; // emerald-500
-    primaryHoverRGB = "5, 150, 105"; // emerald-600
-    primaryLightRGB = "52, 211, 153"; // emerald-400
-  } else if (paletteName.includes("Índigo")) {
-    primaryRGB = "99, 102, 241"; // indigo-500
-    primaryHoverRGB = "79, 70, 229"; // indigo-600
-    primaryLightRGB = "129, 140, 248"; // indigo-400
-  } else {
-    // Default Blue, no overrides needed
-    return "";
-  }
-  
-  return `
-    /* OVERRIDES PARA PALETA DE COLORES: ${paletteName} */
-    .text-blue-400 { color: rgb(${primaryLightRGB}) !important; }
-    .text-blue-505 { color: rgb(${primaryRGB}) !important; }
-    .text-blue-500 { color: rgb(${primaryRGB}) !important; }
-    .text-blue-600 { color: rgb(${primaryHoverRGB}) !important; }
-    .bg-blue-600 { background-color: rgb(${primaryHoverRGB}) !important; }
-    .bg-blue-500 { background-color: rgb(${primaryRGB}) !important; }
-    .bg-blue-600\\/10 { background-color: rgba(${primaryHoverRGB}, 0.1) !important; }
-    .bg-blue-600\\/20 { background-color: rgba(${primaryHoverRGB}, 0.2) !important; }
-    .bg-blue-500\\/10 { background-color: rgba(${primaryRGB}, 0.1) !important; }
-    .bg-blue-500\\/20 { background-color: rgba(${primaryRGB}, 0.2) !important; }
-    .border-blue-500\\/10 { border-color: rgba(${primaryRGB}, 0.1) !important; }
-    .border-blue-500\\/15 { border-color: rgba(${primaryRGB}, 0.15) !important; }
-    .border-blue-500\\/20 { border-color: rgba(${primaryRGB}, 0.2) !important; }
-    .border-blue-500\\/25 { border-color: rgba(${primaryRGB}, 0.25) !important; }
-    .border-blue-504\\/20 { border-color: rgba(${primaryRGB}, 0.2) !important; }
-    .border-blue-500 { border-color: rgb(${primaryRGB}) !important; }
-    .focus\\:border-blue-500:focus { border-color: rgb(${primaryRGB}) !important; }
-    .accent-blue-500 { accent-color: rgb(${primaryRGB}) !important; }
-    .border-t-blue-500 { border-top-color: rgb(${primaryRGB}) !important; }
-    .shadow-blue-500\\/25 { --tw-shadow-color: rgba(${primaryRGB}, 0.25) !important; }
-    .shadow-blue-500\\/20 { --tw-shadow-color: rgba(${primaryRGB}, 0.2) !important; }
-    .hover\\:bg-blue-600:hover { background-color: rgb(${primaryHoverRGB}) !important; }
-    .hover\\:text-blue-400:hover { color: rgb(${primaryLightRGB}) !important; }
-    .hover\\:border-blue-500\\/25:hover { border-color: rgba(${primaryRGB}, 0.25) !important; }
-    .hover\\:bg-blue-600\\/20:hover { background-color: rgba(${primaryHoverRGB}, 0.2) !important; }
-    .bg-blue-500\\/10 { background-color: rgba(${primaryRGB}, 0.1) !important; }
-  `;
 }
 
 export default function App() {
@@ -631,14 +576,18 @@ export default function App() {
     }
   }, [isSheetLoading, allProducts]);
 
-  // Aplica color dinámico + SEO de tienda cuando cambia la config
+  // Aplica color dinámico + SEO de tienda cuando cambia la config.
+  // resolveEffectiveTheme maneja la compatibilidad con la columna legacy
+  // PALETA DE COLORES de tiendas configuradas con el sistema viejo.
   useEffect(() => {
     try {
-      applyTheme(
-        String(webSettings.colorPreset || webSettings.paletaColores || "Azul"),
-        String(webSettings.colorPrimario || "#2563EB"),
-        String(webSettings.colorSecundario || "#4F46E5")
+      const eff = resolveEffectiveTheme(
+        String(webSettings.colorPreset || ""),
+        String(webSettings.colorPrimario || ""),
+        String(webSettings.colorSecundario || ""),
+        String(webSettings.paletaColores || "")
       );
+      applyTheme(eff.preset, eff.primario, eff.secundario);
     } catch { /* noop */ }
     try {
       const cats: string[] = (allProducts as Product[]).map((p) => String(p.category || "")).filter((c) => c !== "").slice(0, 12);
@@ -660,7 +609,7 @@ export default function App() {
   }, [selectedProduct]);
 
   // --- Toasts management ---
-  const showToast = (text: string, type: "success" | "info" | "error" = "success") => {
+  const showToast = (text: string, type: "success" | "info" | "error" | "warning" = "success") => {
     const id = `toast-${Date.now()}`;
     setToasts((prev) => [...prev, { id, text, type }]);
   };
@@ -1072,10 +1021,24 @@ export default function App() {
           ⚠️ Tu Cuenta Puede ser Pausada por Falta de Pago — regularizá tu cuenta para mantener la tienda activa.
         </div>
       )}
-      {/* Dynamic Style Overrides for Color Palette */}
-      {webSettings.paletaColores && (
-        <style dangerouslySetInnerHTML={{ __html: getPaletteCSS(webSettings.paletaColores) }} />
-      )}
+      {/* Dynamic Style Overrides for Color Palette (repinta las clases azules
+          hardcodeadas con el color primario efectivo de la tienda) */}
+      {(() => {
+        try {
+          const eff = resolveEffectiveTheme(
+            String(webSettings.colorPreset || ""),
+            String(webSettings.colorPrimario || ""),
+            String(webSettings.colorSecundario || ""),
+            String(webSettings.paletaColores || "")
+          );
+          const t = resolveTheme(eff.preset, eff.primario, eff.secundario);
+          const css = buildPaletteOverrides(t.primary);
+          if (!css) return null;
+          return <style dangerouslySetInnerHTML={{ __html: css }} />;
+        } catch {
+          return null;
+        }
+      })()}
       
       {/* Dynamic Popups, Toasts, Header, drawlers */}
       {isSheetLoading && window.location.search.includes("p=") && (

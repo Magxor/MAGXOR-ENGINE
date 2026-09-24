@@ -9,6 +9,7 @@ import {
 import { parseCSV, submitToAppsScript, formatPrice } from "../utils";
 import { formatearFechaES, formatearHoraES, splitFechaHora } from "../lib/fecha";
 import { api, isEndpointConfigured, sessionSet, sessionGet } from "../lib/api";
+import { COLOR_PRESETS, resolveEffectiveTheme, isHex } from "../lib/theme";
 import { Product } from "../types";
 import { UserManagement } from "./UserManagement";
 import OrderClientsCards from "./OrderClientsCards";
@@ -193,11 +194,31 @@ interface AdminPortalProps {
     contactoMayorista: string;
     contactoTicket?: string;
     paletaColores: string;
+    colorPreset?: string;
+    colorPrimario?: string;
+    colorSecundario?: string;
     anuncioHeader?: string;
     endpointAppsScript?: string;
   };
   onupdateConfig: (settings: any) => void;
-  showToast: (text: string, type?: "success" | "info" | "error") => void;
+  showToast: (text: string, type?: "success" | "info" | "error" | "warning") => void;
+}
+
+// Deriva los valores editables de color desde webSettings, con fallback a la
+// columna legacy PALETA DE COLORES para tiendas configuradas con el sistema viejo.
+function colorFormFromSettings(ws: AdminPortalProps["webSettings"]) {
+  const eff = resolveEffectiveTheme(
+    String(ws.colorPreset || ""),
+    String(ws.colorPrimario || ""),
+    String(ws.colorSecundario || ""),
+    String(ws.paletaColores || "")
+  );
+  const base = COLOR_PRESETS[eff.preset] || COLOR_PRESETS.Azul;
+  return {
+    colorPreset: eff.preset,
+    colorPrimario: eff.primario || base.primary,
+    colorSecundario: eff.secundario || base.secondary,
+  };
 }
 
 export default function AdminPortal({
@@ -703,6 +724,7 @@ export default function AdminPortal({
     contactoMayorista: webSettings.contactoMayorista,
     contactoTicket: webSettings.contactoTicket || webSettings.contactoMinorista || "5493584164396",
     paletaColores: webSettings.paletaColores,
+    ...colorFormFromSettings(webSettings),
     anuncioHeader: webSettings.anuncioHeader || "🔥 Obtené una Tienda como Está!!",
     logoUrl: (webSettings as Record<string, string>).logoUrl || "",
     faviconUrl: (webSettings as Record<string, string>).faviconUrl || "",
@@ -778,6 +800,7 @@ export default function AdminPortal({
       contactoMayorista: webSettings.contactoMayorista,
       contactoTicket: webSettings.contactoTicket || webSettings.contactoMinorista || "5493584164396",
       paletaColores: webSettings.paletaColores,
+      ...colorFormFromSettings(webSettings),
       anuncioHeader: webSettings.anuncioHeader || "🔥 Obtené una Tienda como Está!!",
       logoUrl: (webSettings as Record<string, string>).logoUrl || "",
       faviconUrl: (webSettings as Record<string, string>).faviconUrl || "",
@@ -962,7 +985,9 @@ export default function AdminPortal({
           contacto_minorista: formData.contactoMinorista,
           contacto_mayorista: formData.contactoMayorista,
           contacto_ticket: formData.contactoTicket,
-          paleta_colores: formData.paletaColores,
+          color_preset: formData.colorPreset,
+          color_primario: formData.colorPrimario,
+          color_secundario: formData.colorSecundario,
           anuncio_header: formData.anuncioHeader,
           logo_url: formData.logoUrl,
           favicon_url: formData.faviconUrl,
@@ -2811,20 +2836,78 @@ export default function AdminPortal({
                         />
                       </div>
 
-                      <div>
+                      <div className="sm:col-span-2">
                         <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">
-                          Paleta de Colores
+                          Preset de Color
                         </label>
                         <select
-                          value={formData.paletaColores}
-                          onChange={(e) => setFormData({ ...formData, paletaColores: e.target.value })}
+                          value={formData.colorPreset}
+                          onChange={(e) => {
+                            const name = e.target.value;
+                            const p = COLOR_PRESETS[name];
+                            setFormData({
+                              ...formData,
+                              colorPreset: name,
+                              colorPrimario: p?.primary || formData.colorPrimario,
+                              colorSecundario: p?.secondary || formData.colorSecundario,
+                            });
+                          }}
                           className="w-full text-xs bg-[#151515] text-white rounded-xl border border-white/10 px-4 py-2.5 focus:border-blue-500 focus:outline-none"
                         >
-                          <option value="Azul / Oscuro">Azul / Oscuro (Magxor Engine)</option>
-                          <option value="Cian / Oscuro">Cian / Oscuro (Clásico)</option>
-                          <option value="Esmeralda / Oscuro">Esmeralda / Oscuro (Tecnológico)</option>
-                          <option value="Índigo / Oscuro">Índigo / Oscuro (Premium)</option>
+                          <option value="Azul">Azul (Magxor Engine)</option>
+                          <option value="Cian">Cian (Clásico)</option>
+                          <option value="Esmeralda">Esmeralda (Tecnológico)</option>
+                          <option value="Índigo">Índigo (Premium)</option>
+                          <option value="Rosa">Rosa (Boutique)</option>
+                          <option value="Naranja">Naranja (Energía)</option>
                         </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">
+                          Color Primario
+                        </label>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="color"
+                            value={isHex(formData.colorPrimario) ? formData.colorPrimario : "#2563EB"}
+                            onChange={(e) => setFormData({ ...formData, colorPrimario: e.target.value.toUpperCase() })}
+                            className="w-10 h-9 rounded-lg border border-white/10 bg-[#151515] cursor-pointer p-1"
+                            aria-label="Selector de color primario"
+                          />
+                          <input
+                            type="text"
+                            value={formData.colorPrimario}
+                            onChange={(e) => setFormData({ ...formData, colorPrimario: e.target.value.toUpperCase() })}
+                            placeholder="#2563EB"
+                            className="flex-1 text-xs bg-[#151515] text-white rounded-xl border border-white/10 px-4 py-2.5 focus:border-blue-500 focus:outline-none font-mono"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">
+                          Color Secundario
+                        </label>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="color"
+                            value={isHex(formData.colorSecundario) ? formData.colorSecundario : "#4F46E5"}
+                            onChange={(e) => setFormData({ ...formData, colorSecundario: e.target.value.toUpperCase() })}
+                            className="w-10 h-9 rounded-lg border border-white/10 bg-[#151515] cursor-pointer p-1"
+                            aria-label="Selector de color secundario"
+                          />
+                          <input
+                            type="text"
+                            value={formData.colorSecundario}
+                            onChange={(e) => setFormData({ ...formData, colorSecundario: e.target.value.toUpperCase() })}
+                            placeholder="#4F46E5"
+                            className="flex-1 text-xs bg-[#151515] text-white rounded-xl border border-white/10 px-4 py-2.5 focus:border-blue-500 focus:outline-none font-mono"
+                          />
+                        </div>
+                        <span className="text-[10px] text-slate-500 mt-1 block">
+                          El preset completa los hex automáticamente; podés pisarlos con cualquier color a medida.
+                        </span>
                       </div>
 
                       <div className="sm:col-span-2">

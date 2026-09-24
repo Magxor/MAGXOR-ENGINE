@@ -25,11 +25,12 @@ El Sheet queda **privado** (Restringido). Solo este script lo lee.
 
 ## 4. Mantenimiento
 - Rotar lectura: ejecuta `rotarReadToken()` y actualiza `VITE_READ_TOKEN`.
-- Cambiar clave: `cambiarClave("admin", "NUEVA")` o desde Admin → Cambiar contraseña.
+- Cambiar clave: `cambiarClave("admin", "NUEVA")` desde el editor (o Admin → Cambiar credenciales, que actualiza usuario + clave juntos).
 - Admin pass (sección sensible): `setAdminPass("admin", "NUEVA")`. Nunca pegues la clave en claro en el Sheet.
 - Tiendas existentes: tras actualizar `Code.gs`, ejecuta `migrarSeguridad()` una vez (agrega columnas sin borrar datos).
+- Colores: se gestionan desde el panel Admin (Preset de Color + HEX primario/secundario) → columnas `COLOR_PRESET`, `COLOR_PRIMARIO`, `COLOR_SECUNDARIO`. La columna legacy `PALETA DE COLORES` solo se lee por compatibilidad con tiendas viejas. `MODO_OSCURO` fue eliminado (el dark mode es un toggle local del visitante).
 
 ## 5. Control maestro de cuenta (DATOS)
 - `ESTADO_CUENTA`: `SI` (normal) | `ATRASO` (tienda visible + aviso de pago, admin entra con alerta) | `NO` (tienda y login suspendidos, se muestra `SUSPENSION_IMAGE_URL` + `SUSPENSION_MENSAJE`).
 - Con `NO`, el endpoint también rechaza pedidos/reseñas/clientes nuevos.
-- Acciones endpoint: `health, getConfig, getProducts, getReviews, addOrder, addReview, addClient` (+ admin con `session`: `listOrders, listClients, updateOrderStatus, deleteOrder, updateClientContact, deleteClient, add/update/delete Product, updateConfig, changePassword`).
+- Acciones endpoint: `health, getConfig, getProducts, getReviews, addOrder, addReview, addClient` (+ admin con `session`: `sessionPing, listOrders, listClients, updateOrderStatus, updateOrderDetail, deleteOrder, updateClientContact, deleteClient, add/update/delete Product, updateConfig, changeCredentials, verifyAdminPass, listUsers, createUser, deleteUser, updateUser` — gestión de usuarios requiere además `adminPass`).

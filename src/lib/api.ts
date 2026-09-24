@@ -11,7 +11,6 @@ export interface MxConfig {
   colorPreset: string;
   colorPrimario: string;
   colorSecundario: string;
-  modoOscuro: string;
   logoUrl: string;
   faviconUrl: string;
   logoAnimadoUrl: string;

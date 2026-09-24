@@ -4,7 +4,7 @@ import { Check, X } from "lucide-react";
 export interface ToastMessage {
   id: string;
   text: string;
-  type: "success" | "info" | "error";
+  type: "success" | "info" | "error" | "warning";
 }
 
 interface ToastProps {
@@ -36,6 +36,10 @@ function ToastItem({ toast, onClose }: { toast: ToastMessage; onClose: () => voi
       <div className="flex items-center gap-3">
         {toast.type === "success" ? (
           <div className="bg-emerald-500/10 text-emerald-400 dark:text-emerald-600 p-1.5 rounded-lg">
+            <Check className="w-4 h-4" />
+          </div>
+        ) : toast.type === "warning" ? (
+          <div className="bg-amber-500/10 text-amber-400 dark:text-amber-600 p-1.5 rounded-lg">
             <Check className="w-4 h-4" />
           </div>
         ) : (

@@ -1,13 +1,26 @@
 /**
- * MAGXOR ENGINE — Backend único (Google Apps Script Web App) — V2
+ * MAGXOR ENGINE — Backend único (Google Apps Script Web App) — V3
  * 
  * CAMBIOS EN FLUJO DE ESTADOS DE CUENTA:
  * - Estado SI: login sin problema
  * - Estado ATRASO: toast al login + banner permanente
  * - Estado NO: login bloqueado
+ *
+ * LIMPIEZA V3:
+ * - Acción getEstadoCuenta eliminada → reemplazada por sessionPing
+ *   (valida sesión, renueva expiración deslizante y devuelve estadoCuenta).
+ * - Acciones changePassword / changeAdminPass eliminadas (no usadas por el
+ *   frontend; se usan cambiarClave() / setAdminPass() desde el editor).
+ * - Campo MODO_OSCURO eliminado (el dark mode es un toggle local del visitante).
+ * - Campo PALETA DE COLORES deprecado (solo lectura por compatibilidad con
+ *   tiendas viejas; el color se gestiona con COLOR_PRESET/PRIMARIO/SECUNDARIO).
+ * - updateConfig ahora hace lectura-modificación-escritura: solo pisa los
+ *   campos enviados y escribe alineado a los encabezados reales de la hoja
+ *   (antes borraba SEO/splash/moneda/estado en cada guardado del Admin).
  * 
  * Pegar en Extensiones > Apps Script, luego ejecutar setupMagxor() una vez
  * y desplegar como Aplicación web (Ejecutar como: Yo / Acceso: Cualquiera).
+ * Tiendas existentes: ejecutar migrarSeguridad() una vez tras actualizar.
  */
 
 var SHEETS = {
@@ -20,7 +33,7 @@ var SHEETS = {
   auditLog: 'AUDIT_LOG'
 };
 
-var DATOS_HEADERS = ['NOMBRE WEB','SLOGAN','HORARIOS','DIRECCIÓN','CONTACTO MINORISTA','CONTACTO MAYORISTA','CONTACTO TICKET','PALETA DE COLORES','ANUNCIO HEADER','ENDPOINT APPS SCRIPT','COLOR_PRESET','COLOR_PRIMARIO','COLOR_SECUNDARIO','MODO_OSCURO','LOGO_URL','FAVICON_URL','LOGO_ANIMADO_URL','SPLASH_ACTIVO','SPLASH_DURACION_MS','SPLASH_FONDO','SEO_TITULO','SEO_DESCRIPCION','SEO_KEYWORDS','SEO_URL_CANONICA','SEO_ROBOTS','MONEDA','ESTADO_CUENTA','SUSPENSION_IMAGE_URL','SUSPENSION_MENSAJE'];
+var DATOS_HEADERS = ['NOMBRE WEB','SLOGAN','HORARIOS','DIRECCIÓN','CONTACTO MINORISTA','CONTACTO MAYORISTA','CONTACTO TICKET','ANUNCIO HEADER','ENDPOINT APPS SCRIPT','COLOR_PRESET','COLOR_PRIMARIO','COLOR_SECUNDARIO','LOGO_URL','FAVICON_URL','LOGO_ANIMADO_URL','SPLASH_ACTIVO','SPLASH_DURACION_MS','SPLASH_FONDO','SEO_TITULO','SEO_DESCRIPCION','SEO_KEYWORDS','SEO_URL_CANONICA','SEO_ROBOTS','MONEDA','ESTADO_CUENTA','SUSPENSION_IMAGE_URL','SUSPENSION_MENSAJE'];
 var INV_HEADERS = ['Id','Nombre de Producto','Categoría','Descripción','Precio','Precio Oferta','Disponible','Oferta','Fotos'];
 var RES_HEADERS = ['productId','name','rating','comment','date'];
 var CLI_HEADERS = ['PHONE','DATE','METODO','CONTACTO'];
@@ -504,7 +517,6 @@ function readConfig() {
   cfg.colorPreset = get(['color_preset', 'color preset']) || 'Azul';
   cfg.colorPrimario = get(['color_primario', 'color primario']) || '#2563EB';
   cfg.colorSecundario = get(['color_secundario', 'color secundario']) || '#4F46E5';
-  cfg.modoOscuro = get(['modo_oscuro', 'modo oscuro']) || 'SI';
   cfg.logoUrl = get(['logo_url', 'logo url', 'logo']) || '';
   cfg.faviconUrl = get(['favicon_url', 'favicon url', 'favicon']) || '';
   cfg.logoAnimadoUrl = get(['logo_animado_url', 'logo animado url']) || '';
@@ -649,9 +661,17 @@ function handleAdminWrite(action, p) {
     var sh, data, r;
     if (action === 'listOrders') return json({ status: 'ok', orders: sheetToObjects(ss.getSheetByName(SHEETS.pedidos)) });
     if (action === 'listClients') return json({ status: 'ok', clients: sheetToObjects(ss.getSheetByName(SHEETS.clientes)) });
-    if (action === 'getEstadoCuenta') {
-      var estado = getEstadoCuenta();
-      return json({ status: 'ok', estadoCuenta: estado });
+    if (action === 'sessionPing') {
+      // Ping liviano del Admin: la sesión ya fue validada por requireSession().
+      // Renueva la expiración deslizante y devuelve el estado de la cuenta.
+      var tokPing = String(p.session || p.token || '');
+      var propsPing = PropertiesService.getScriptProperties();
+      var storePing = JSON.parse(propsPing.getProperty('SESSION_TOKENS') || '{}');
+      if (storePing[tokPing]) {
+        storePing[tokPing].exp = Date.now() + 12 * 3600 * 1000;
+        propsPing.setProperty('SESSION_TOKENS', JSON.stringify(storePing));
+      }
+      return json({ status: 'ok', action: action, estadoCuenta: getEstadoCuenta() });
     }
     if (action === 'updateOrderStatus') {
       sh = ss.getSheetByName(SHEETS.pedidos);
@@ -705,13 +725,26 @@ function handleAdminWrite(action, p) {
     }
     if (action === 'updateConfig') {
       var ds = ensureSheet(ss, SHEETS.datos, DATOS_HEADERS);
+      mergeHeaders(ss, SHEETS.datos, DATOS_HEADERS);
       var estadoAnterior = getEstadoCuenta();
-      var vals = DATOS_HEADERS.map(function (h) { return configValueFor(h, p); });
-      if (ds.getLastRow() > 1) ds.deleteRows(2, ds.getLastRow() - 1);
-      ds.appendRow(vals);
-      var estadoNuevo = configValueFor('estado_cuenta', p) || 'SI';
-      if (estadoAnterior !== estadoNuevo) {
-        auditLog(currentSessionUser(p), 'cambio_estado_cuenta', { detalles: 'Estado modificado' }, estadoAnterior, estadoNuevo);
+      // Lectura-modificación-escritura: solo se pisan los campos presentes en
+      // el request y se escribe alineado a los encabezados REALES de la hoja
+      // (evita desalineación en tiendas migradas y ya no vacía campos no enviados).
+      var headersCfg = ds.getRange(1, 1, 1, ds.getLastColumn()).getValues()[0];
+      var filaCfg = ds.getLastRow() >= 2 ? ds.getRange(2, 1, 1, ds.getLastColumn()).getValues()[0] : [];
+      var valsCfg = headersCfg.map(function (h, idx) {
+        var enviado = configValueFor(h, p);
+        if (enviado !== undefined) return enviado;
+        return (filaCfg[idx] !== undefined && filaCfg[idx] !== null) ? filaCfg[idx] : '';
+      });
+      if (ds.getLastRow() >= 2) {
+        ds.getRange(2, 1, 1, headersCfg.length).setValues([valsCfg]);
+      } else {
+        ds.appendRow(valsCfg);
+      }
+      var estadoNuevoCfg = getEstadoCuenta();
+      if (estadoAnterior !== estadoNuevoCfg) {
+        auditLog(currentSessionUser(p), 'cambio_estado_cuenta', { detalles: 'Estado modificado' }, estadoAnterior, estadoNuevoCfg);
       }
       return json({ status: 'ok', action: action });
     }
@@ -742,12 +775,6 @@ function handleAdminWrite(action, p) {
         mensaje: 'Usuario y contraseña actualizados correctamente.'
       });
     }
-    if (action === 'changePassword') {
-      var me = currentSessionUser(p);
-      cambiarClave(p.username || me, String(p.newPassword || ''));
-      auditLog(me, 'cambio_contrasena', { usuario: p.username || me }, 'SI', 'SI');
-      return json({ status: 'ok', action: action });
-    }
     if (action === 'verifyAdminPass') {
       var who = currentSessionUser(p);
       var targetUser = String(p.username || who || '').trim().toLowerCase();
@@ -764,12 +791,6 @@ function handleAdminWrite(action, p) {
         }
       }
       throw new Error('Usuario no encontrado.');
-    }
-    if (action === 'changeAdminPass') {
-      var me2 = currentSessionUser(p);
-      setAdminPass(p.username || me2, String(p.newAdminPass || ''));
-      auditLog(me2, 'cambio_admin_pass', { usuario: p.username || me2 }, 'SI', 'SI');
-      return json({ status: 'ok', action: action });
     }
     
     // ====================================================================
@@ -962,19 +983,37 @@ function ensureSheet(ss, name, headers) {
 }
 
 function defaultConfig() {
-  return { nombreWeb: 'Magxor Engine', slogan: '', horarios: 'Lun/Vie: 09:00-13:00, 16:00-20:00 - Sáb: 09:00-13:00', direccion: '', contactoMinorista: '', contactoMayorista: '', contactoTicket: '', paletaColores: 'Azul / Oscuro', anuncioHeader: '', colorPreset: 'Azul', colorPrimario: '#2563EB', colorSecundario: '#4F46E5', modoOscuro: 'SI', logoUrl: '', faviconUrl: '', logoAnimadoUrl: '', splashActivo: 'NO', splashDuracionMs: 2000, splashFondo: '#0A0A0A', seoTitulo: 'Magxor Engine — Tienda online', seoDescripcion: 'Catálogo online de Magxor Engine.', seoKeywords: 'tienda online, catálogo, ofertas', seoUrlCanonica: '', seoRobots: 'index, follow', moneda: 'ARS', estadoCuenta: 'SI', suspensionImageUrl: '', suspensionMensaje: '' };
+  return { nombreWeb: 'Magxor Engine', slogan: '', horarios: 'Lun/Vie: 09:00-13:00, 16:00-20:00 - Sáb: 09:00-13:00', direccion: '', contactoMinorista: '', contactoMayorista: '', contactoTicket: '', paletaColores: '', anuncioHeader: '', colorPreset: 'Azul', colorPrimario: '#2563EB', colorSecundario: '#4F46E5', logoUrl: '', faviconUrl: '', logoAnimadoUrl: '', splashActivo: 'NO', splashDuracionMs: 2000, splashFondo: '#0A0A0A', seoTitulo: 'Magxor Engine — Tienda online', seoDescripcion: 'Catálogo online de Magxor Engine.', seoKeywords: 'tienda online, catálogo, ofertas', seoUrlCanonica: '', seoRobots: 'index, follow', moneda: 'ARS', estadoCuenta: 'SI', suspensionImageUrl: '', suspensionMensaje: '' };
 }
 
 function seedDefaultConfig(ss) {
   var sh = ss.getSheetByName(SHEETS.datos);
   if (sh && sh.getLastRow() >= 2) return;
   var d = defaultConfig();
-  sh.appendRow([d.nombreWeb, d.slogan, d.horarios, d.direccion, d.contactoMinorista, d.contactoMayorista, d.contactoTicket, d.paletaColores, d.anuncioHeader, '', d.colorPreset, d.colorPrimario, d.colorSecundario, d.modoOscuro, d.logoUrl, d.faviconUrl, d.logoAnimadoUrl, d.splashActivo, d.splashDuracionMs, d.splashFondo, d.seoTitulo, d.seoDescripcion, d.seoKeywords, d.seoUrlCanonica, d.seoRobots, d.moneda, d.estadoCuenta, d.suspensionImageUrl, d.suspensionMensaje]);
+  // Seed alineado a DATOS_HEADERS por nombre de columna (a prueba de reordenamientos).
+  var mapa = {
+    'nombre web': d.nombreWeb, 'slogan': d.slogan, 'horarios': d.horarios, 'dirección': d.direccion,
+    'contacto minorista': d.contactoMinorista, 'contacto mayorista': d.contactoMayorista, 'contacto ticket': d.contactoTicket,
+    'anuncio header': d.anuncioHeader, 'endpoint apps script': '',
+    'color_preset': d.colorPreset, 'color_primario': d.colorPrimario, 'color_secundario': d.colorSecundario,
+    'logo_url': d.logoUrl, 'favicon_url': d.faviconUrl, 'logo_animado_url': d.logoAnimadoUrl,
+    'splash_activo': d.splashActivo, 'splash_duracion_ms': d.splashDuracionMs, 'splash_fondo': d.splashFondo,
+    'seo_titulo': d.seoTitulo, 'seo_descripcion': d.seoDescripcion, 'seo_keywords': d.seoKeywords,
+    'seo_url_canonica': d.seoUrlCanonica, 'seo_robots': d.seoRobots, 'moneda': d.moneda,
+    'estado_cuenta': d.estadoCuenta, 'suspension_image_url': d.suspensionImageUrl, 'suspension_mensaje': d.suspensionMensaje
+  };
+  sh.appendRow(DATOS_HEADERS.map(function (h) {
+    var v = mapa[String(h).toLowerCase()];
+    return v === undefined ? '' : v;
+  }));
 }
 
+// Devuelve el valor enviado en el request para un encabezado dado,
+// o UNDEFINED si el campo no fue enviado (updateConfig preserva el valor
+// existente en esos casos).
 function configValueFor(header, p) {
   var h = String(header).toLowerCase();
-  var pick = function () { for (var i = 0; i < arguments.length; i++) { if (p[arguments[i]] !== undefined) return String(p[arguments[i]]); } return ''; };
+  var pick = function () { for (var i = 0; i < arguments.length; i++) { if (p[arguments[i]] !== undefined) return String(p[arguments[i]]); } return undefined; };
   if (h === 'nombre web') return pick('nombre_web', 'nombreWeb', 'nombre');
   if (h === 'slogan' || h === 'lema') return pick('slogan');
   if (h === 'horarios') return pick('horarios');
@@ -982,13 +1021,14 @@ function configValueFor(header, p) {
   if (h.indexOf('minorista') !== -1) return pick('contacto_minorista', 'contactoMinorista');
   if (h.indexOf('mayorista') !== -1) return pick('contacto_mayorista', 'contactoMayorista');
   if (h.indexOf('ticket') !== -1) return pick('contacto_ticket', 'contactoTicket');
+  // Legacy: solo se acepta por compatibilidad con hojas viejas que aún tienen
+  // la columna PALETA DE COLORES. El color actual se gestiona con COLOR_*.
   if (h.indexOf('paleta') !== -1) return pick('paleta_colores', 'paletaColores');
   if (h.indexOf('anuncio') !== -1) return pick('anuncio_header', 'anuncioHeader');
   if (h.indexOf('endpoint') !== -1) return pick('endpoint_apps_script');
   if (h === 'color_preset') return pick('color_preset', 'colorPreset');
   if (h === 'color_primario') return pick('color_primario', 'colorPrimario');
   if (h === 'color_secundario') return pick('color_secundario', 'colorSecundario');
-  if (h === 'modo_oscuro') return pick('modo_oscuro', 'modoOscuro');
   if (h === 'logo_url') return pick('logo_url', 'logoUrl');
   if (h === 'favicon_url') return pick('favicon_url', 'faviconUrl');
   if (h === 'logo_animado_url') return pick('logo_animado_url', 'logoAnimadoUrl');
@@ -1004,7 +1044,7 @@ function configValueFor(header, p) {
   if (h === 'estado_cuenta') return pick('estado_cuenta', 'estadoCuenta');
   if (h === 'suspension_image_url') return pick('suspension_image_url', 'suspensionImageUrl');
   if (h === 'suspension_mensaje') return pick('suspension_mensaje', 'suspensionMensaje');
-  return '';
+  return undefined;
 }
 
 function sheetToObjects(sh) {
