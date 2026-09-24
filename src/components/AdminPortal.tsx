@@ -884,17 +884,27 @@ export default function AdminPortal({
         if (res.atraso) {
           setIsAtraso(true);
           setShowAtrasoModal(true);
-          showToast("⚠️ Cuenta con pago pendiente: regularizá tu situación.", "error");
-        } else {
-          setIsAtraso(false);
           setWelcomeInfo({ user: loggedUser, pendientes, nuevos });
-          showToast(`¡Bienvenido @${loggedUser}!`, "success");
           if (pendientes > 0) {
             showToast(`📦 Tienes ${pendientes} pedido${pendientes === 1 ? "" : "s"} pendiente${pendientes === 1 ? "" : "s"}.`, "warning");
           }
           if (nuevos > 0) {
             showToast(`👥 Tienes ${nuevos} cliente${nuevos === 1 ? "" : "s"} nuevo${nuevos === 1 ? "" : "s"} esta semana.`, "info");
           }
+          showToast(`¡Bienvenido @${loggedUser}!`, "success");
+          setTimeout(() => {
+            showToast("⚠️ Cuenta con pago pendiente: tu cuenta puede ser pausada por falta de pago.", "error");
+          }, 400);
+        } else {
+          setIsAtraso(false);
+          setWelcomeInfo({ user: loggedUser, pendientes, nuevos });
+          if (pendientes > 0) {
+            showToast(`📦 Tienes ${pendientes} pedido${pendientes === 1 ? "" : "s"} pendiente${pendientes === 1 ? "" : "s"}.`, "warning");
+          }
+          if (nuevos > 0) {
+            showToast(`👥 Tienes ${nuevos} cliente${nuevos === 1 ? "" : "s"} nuevo${nuevos === 1 ? "" : "s"} esta semana.`, "info");
+          }
+          showToast(`¡Bienvenido @${loggedUser}!`, "success");
         }
         return;
       }
@@ -2882,7 +2892,7 @@ export default function AdminPortal({
                         </div>
                       </div>
 
-                      {/* Portada splash móvil: imagen o video ≤10s, siempre WebP */}
+                      {/* Portada splash móvil: imagen o video ≤3s, siempre WebP */}
                       <div className="bg-[#111111] rounded-2xl border border-white/5 p-5 space-y-4">
                         <div className="flex items-center gap-3">
                           <div className="p-2 rounded-xl bg-purple-500/10 text-purple-400">
@@ -2890,14 +2900,26 @@ export default function AdminPortal({
                           </div>
                           <div>
                             <h4 className="text-xs font-bold text-white uppercase tracking-wider">Portada Splash (vista móvil)</h4>
-                            <p className="text-[10px] text-slate-400 mt-0.5">Video de hasta 10 segundos o imagen. Ambos se convierten a WebP.</p>
+                            <p className="text-[10px] text-slate-400 mt-0.5">Video de hasta 3 segundos o imagen. Ambos se convierten a WebP.</p>
                           </div>
                         </div>
                         {formData.logoAnimadoUrl && (
-                          <img src={formData.logoAnimadoUrl} alt="Portada" className="w-full max-h-48 object-cover rounded-xl border border-white/10" referrerPolicy="no-referrer" />
+                          <div className="space-y-3">
+                            <img src={formData.logoAnimadoUrl} alt="Portada" className="w-full max-h-48 object-cover rounded-xl border border-white/10" referrerPolicy="no-referrer" />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setFormData((p) => ({ ...p, logoAnimadoUrl: "" }));
+                                showToast("Portada splash eliminada. Guardá los cambios.", "info");
+                              }}
+                              className="w-full py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                            >
+                              Eliminar Portada Splash
+                            </button>
+                          </div>
                         )}
                         <label className="block px-4 py-3 bg-white/5 hover:bg-white/10 border border-dashed border-white/15 rounded-xl text-xs text-slate-300 cursor-pointer text-center">
-                          {isUploadingSplash ? "Convirtiendo y subiendo a WebP..." : "Subir imagen o video (máx 10s)"}
+                          {isUploadingSplash ? "Convirtiendo y subiendo a WebP..." : "Subir imagen o video (máx 3s)"}
                           <input type="file" accept="image/*,video/mp4,video/webm,video/quicktime" className="hidden" disabled={isUploadingSplash} onChange={async (e) => {
                             const f = e.target.files?.[0]; if (!f) return;
                             setIsUploadingSplash(true);
@@ -2916,7 +2938,7 @@ export default function AdminPortal({
                           </div>
                           <div>
                             <h4 className="text-xs font-bold text-white uppercase tracking-wider">Credenciales de Acceso Admin</h4>
-                            <p className="text-[10px] text-slate-400 mt-0.5">Modificá tu usuario y contraseña (ejecuta action=changeCredentials). El usuario MAGXOR es rol Desarrollador y no figura aquí.</p>
+                            <p className="text-[10px] text-slate-400 mt-0.5">Modificá tu usuario y contraseña. El usuario MAGXOR es rol Desarrollador y no figura aquí.</p>
                           </div>
                         </div>
 
@@ -2977,7 +2999,7 @@ export default function AdminPortal({
                           className="px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-white font-bold text-xs rounded-xl border border-white/10 transition-colors flex items-center gap-1.5 cursor-pointer"
                         >
                           {isChangingCreds ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Lock className="w-3.5 h-3.5" />}
-                          <span>Actualizar Credenciales (action=changeCredentials)</span>
+                          <span>Actualizar Credenciales</span>
                         </button>
                       </div>
 

@@ -1161,17 +1161,7 @@ export default function App() {
         
         {/* SECTION 5: CATALOG COMPLEX INTERFACE AND FILTERS */}
         <section id="catalogo" className="max-w-7xl mx-auto px-6 md:px-8 space-y-8">
-          <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 border-b border-white/5 pb-5">
-            <div>
-              <span className="text-xs font-mono text-blue-400 uppercase tracking-widest font-black block">
-                Navegá por Categorías
-              </span>
-              <h2 className="font-display font-bold text-2xl md:text-3.5xl tracking-tight text-white mt-1">
-                Catálogo de Productos Completo
-              </h2>
-            </div>
-          </div>
-
+          
           {/* Tres botones: Buscar / Categorías / Filtros + Limpiar */}
           <div className="space-y-4">
             <div className="grid grid-cols-3 gap-2 sm:flex sm:flex-wrap sm:gap-2.5">

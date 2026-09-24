@@ -617,8 +617,25 @@ function handlePublicWrite(action, p) {
       if (!p.cliente && !p.nombre) throw new Error('Falta nombre del cliente.');
       var tel = String(p.telefono || '').replace(/[^0-9+]/g, '').slice(0, 20);
       if (tel.length < 6) throw new Error('Teléfono inválido.');
-      os.appendRow([s(p.id, 30), s(p.fecha, 40), s(p.cliente || p.nombre, 120), tel, s(p.productos, 5000), parseFloat(p.total) || 0, s(p.entrega, 120), 'PENDIENTE']);
-      auditLog('público', 'pedido_creado', { cliente: p.cliente || p.nombre }, 'SI', 'SI');
+      var clienteNombre = s(p.cliente || p.nombre, 120);
+      os.appendRow([s(p.id, 30), s(p.fecha, 40), clienteNombre, tel, s(p.productos, 5000), parseFloat(p.total) || 0, s(p.entrega, 120), 'PENDIENTE']);
+      
+      // Guardar también automáticamente como cliente en la hoja CLIENTES
+      var cs = ensureSheet(ss, SHEETS.clientes, CLI_HEADERS);
+      var clientData = cs.getDataRange().getValues();
+      var exists = false;
+      for (var i = 1; i < clientData.length; i++) {
+        var existingPhone = String(clientData[i][0] || '').replace(/[^0-9+]/g, '');
+        if (existingPhone && existingPhone === tel) {
+          exists = true;
+          break;
+        }
+      }
+      if (!exists) {
+        cs.appendRow([tel, s(p.fecha, 40), clienteNombre, 'NO']);
+      }
+
+      auditLog('público', 'pedido_creado', { cliente: clienteNombre }, 'SI', 'SI');
     }
     return json({ status: 'ok', action: action });
   } finally { lock.releaseLock(); }
