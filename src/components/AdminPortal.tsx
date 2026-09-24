@@ -1709,7 +1709,7 @@ export default function AdminPortal({
           <div className="w-full max-w-md bg-amber-950 border-2 border-amber-500 rounded-3xl p-6 text-center shadow-2xl animate-scale-in">
             <div className="w-14 h-14 mx-auto rounded-2xl bg-amber-500 text-black flex items-center justify-center"><AlertTriangle className="w-7 h-7" /></div>
             <h3 className="text-lg font-black text-white mt-3">Tu Cuenta Puede ser Pausada por Falta de Pago</h3>
-            <p className="text-sm text-amber-200 mt-2">Regularizá tu cuenta con Magxor Engine para mantener la tienda activa.</p>
+            <p className="text-sm text-amber-200 mt-2">Regularizá tu cuenta con Magxor Digital para mantener la tienda activa.</p>
             <button onClick={() => setShowAtrasoModal(false)} className="mt-5 w-full py-3 bg-amber-500 hover:bg-amber-400 text-black font-extrabold text-sm rounded-xl cursor-pointer">Aceptar</button>
           </div>
         </div>,
@@ -1811,7 +1811,7 @@ export default function AdminPortal({
         {isLoggedIn && isAtraso && (
           <div className="w-full p-3.5 rounded-2xl bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs font-bold flex items-center gap-2 animate-pulse">
             <AlertTriangle className="w-4 h-4 shrink-0" />
-            <span>Tu Cuenta Puede ser Pausada por Falta de Pago: regularizá tu cuenta con Magxor Engine para mantener la tienda activa.</span>
+            <span>Tu Cuenta Puede ser Pausada por Falta de Pago: regularizá tu cuenta con Magxor Digital para mantener la tienda activa.</span>
           </div>
         )}
 
