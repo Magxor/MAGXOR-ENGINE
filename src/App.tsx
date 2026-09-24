@@ -42,6 +42,9 @@ import { api, isEndpointConfigured, type MxConfig } from "./lib/api";
 import { applyTheme } from "./lib/theme";
 import { applyStoreSeo, applyProductSeo, restoreProductSeo } from "./lib/seo";
 import Splash from "./components/Splash";
+import InstallPWA from "./components/InstallPWA";
+import { formatearFechaES, fechaActualES } from "./lib/fecha";
+import { pushModal } from "./lib/modalHistory";
 
 function getGoogleSheetTabUrl(url: string, sheetName: string): string {
   if (!url) return "";
@@ -198,6 +201,7 @@ export default function App() {
     }
     return {
       nombreWeb: "Magxor Engine",
+      slogan: "",
       horarios: "Lun/Vie: 09:00-13:00, 16:00-20:00 - Sáb: 09:00-13:00",
       direccion: "",
       contactoMinorista: "",
@@ -227,6 +231,9 @@ export default function App() {
   });
   const [catalogSearch, setCatalogSearch] = useState("");
   const [showFiltersPanel, setShowFiltersPanel] = useState(false);
+  const [showSearchBox, setShowSearchBox] = useState(false);
+  const [showCategoriesBox, setShowCategoriesBox] = useState(false);
+  const [showFiltersBox, setShowFiltersBox] = useState(false);
   const [itemsPerPage, setItemsPerPage] = useState<number>(20);
   const [currentPage, setCurrentPage] = useState<number>(1);
 
@@ -423,6 +430,7 @@ export default function App() {
           const c = cfgRes.config as MxConfig & Record<string, string>;
           const loadedSettings = {
             nombreWeb: String(c.nombreWeb || "Magxor Engine"),
+            slogan: String(c.slogan || c.SLOGAN || ""),
             horarios: String(c.horarios || "Lun/Vie: 09:00-13:00, 16:00-20:00 - Sáb: 09:00-13:00"),
             direccion: String(c.direccion || ""),
             contactoMinorista: String(c.contactoMinorista || ""),
@@ -549,6 +557,7 @@ export default function App() {
                 return "";
               };
               const nombreWeb = getField(["nombre web", "nombre_web", "nombre", "web name", "title"]);
+              const slogan = getField(["slogan", "lema", "tagline"]);
               const horarios = getField(["horarios", "horario", "hours", "horas", "work hours", "schedules"]);
               const direccion = getField(["dirección", "direccion", "address", "location", "dir"]);
               const contactoMinorista = getField(["contacto minorista", "contacto_minorista", "minorista", "retail contact", "phone minorista"]);
@@ -560,6 +569,7 @@ export default function App() {
 
               const loadedSettings = {
                 nombreWeb: nombreWeb || "Magxor Engine",
+                slogan: slogan || "",
                 horarios: horarios || "Lun/Vie: 09:00-13:00, 16:00-20:00 - Sáb: 09:00-13:00",
                 direccion: direccion || "",
                 contactoMinorista: contactoMinorista || "",
@@ -661,6 +671,7 @@ export default function App() {
 
   // --- Cart Operations ---
   const handleAddToCart = (product: Product, quantity = 1) => {
+    if (!exigirTiendaActiva()) return;
     setCartItems((prev) => {
       const existing = prev.find((item) => item.product.id === product.id);
       let updated: CartItem[];
@@ -706,13 +717,14 @@ export default function App() {
 
   // --- New Review Submission ---
   const handleAddReview = async (productId: string, name: string, rating: number, comment: string) => {
+    if (!exigirTiendaActiva()) return;
     const newReview: ReviewItem = {
       id: `local-rev-${Date.now()}`,
       productId,
       name,
       rating,
       comment,
-      date: new Date().toLocaleDateString("es-AR")
+      date: formatearFechaES(new Date())
     };
 
     // Keep unique reviews list and save locally
@@ -732,7 +744,7 @@ export default function App() {
           name,
           rating,
           comment,
-          date: new Date().toLocaleDateString("es-AR"),
+          date: formatearFechaES(new Date()),
         });
       } catch (e) {
         console.warn("addReview endpoint falló:", e);
@@ -744,7 +756,7 @@ export default function App() {
         name,
         rating,
         comment,
-        date: new Date().toLocaleDateString("es-AR")
+        date: formatearFechaES(new Date())
       };
       await submitToAppsScript(backendUrl, params);
     }
@@ -752,6 +764,7 @@ export default function App() {
 
   // --- Newsletter Signup ---
   const handleSubscribeNewsletter = async (phone: string) => {
+    if (!exigirTiendaActiva()) return;
     showToast(`📱 ¡Número ${phone} adherido al WhatsApp Club!`, "success");
 
     // Save locally
@@ -766,7 +779,7 @@ export default function App() {
       try {
         await api.addClient({
           phone,
-          date: new Date().toLocaleDateString("es-AR"),
+          date: formatearFechaES(new Date()),
           metodo: "Club WhatsApp",
           contacto: "NO",
         });
@@ -777,7 +790,7 @@ export default function App() {
       const params = {
         action: "addClient",
         phone,
-        date: new Date().toLocaleDateString("es-AR"),
+        date: formatearFechaES(new Date()),
         metodo: "Club WhatsApp",
         contacto: "NO"
       };
@@ -799,6 +812,7 @@ export default function App() {
   // --- Contact form Submit ---
   const handleContactSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!exigirTiendaActiva()) return;
     if (!contactName.trim() || !contactMsg.trim()) return;
 
     // Send WhatsApp query
@@ -997,7 +1011,43 @@ export default function App() {
 
   const estadoCuenta = String((webSettings as Record<string, unknown>).estadoCuenta || "SI").toUpperCase();
   const isSuspended = !isSheetLoading && estadoCuenta === "NO";
-  const isAtraso = estadoCuenta === "ATRASO";
+  const isAtraso = estadoCuenta === "ATRASO" || estadoCuenta === "ATRASADO";
+  // Cuenta pausada: se inhabilitan carrito, consultas, reseñas y newsletter
+  const isTiendaBloqueada = estadoCuenta === "NO";
+
+  const exigirTiendaActiva = (): boolean => {
+    if (isTiendaBloqueada) {
+      showToast("Cuenta pausada por falta de pago. Tu web seguirá activa, pero no podrás administrarla ni recibir pedidos.", "error");
+      return false;
+    }
+    return true;
+  };
+
+  // Botón físico atrás cierra el detalle de producto en móvil
+  useEffect(() => {
+    if (!selectedProduct) return;
+    pushModal("product-detail");
+    const handler = () => setSelectedProduct(null);
+    window.addEventListener("popstate", handler);
+    return () => window.removeEventListener("popstate", handler);
+  }, [selectedProduct]);
+
+  // Favicon + título dinámicos desde Datos de la tienda
+  useEffect(() => {
+    try {
+      document.title = String(webSettings.seoTitulo || `${webSettings.nombreWeb || "Magxor Engine"} — Tienda online`);
+      const fav = String(webSettings.faviconUrl || webSettings.logoUrl || "/logo.png");
+      let link = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
+      if (!link) {
+        link = document.createElement("link");
+        link.rel = "icon";
+        document.head.appendChild(link);
+      }
+      link.href = fav;
+      const apple = document.querySelector<HTMLLinkElement>('link[rel="apple-touch-icon"]');
+      if (apple) apple.href = fav;
+    } catch { /* noop */ }
+  }, [webSettings.faviconUrl, webSettings.logoUrl, webSettings.seoTitulo, webSettings.nombreWeb]);
 
   if (isSuspended) {
     const suspImg = String((webSettings as Record<string, unknown>).suspensionImageUrl || "");
@@ -1018,8 +1068,8 @@ export default function App() {
   return (
     <div className="font-sans min-h-screen flex flex-col justify-between bg-[#0A0A0A] text-slate-200 transition-colors duration-300">
       {isAtraso && (
-        <div className="bg-amber-500 text-black text-xs font-bold text-center px-4 py-2 z-[60]">
-          ⚠️ Pago pendiente: regularizá tu cuenta para mantener la tienda activa.
+        <div className="bg-amber-500 text-black text-xs font-bold text-center px-4 py-2 z-[60] animate-pulse sticky top-0">
+          ⚠️ Tu Cuenta Puede ser Pausada por Falta de Pago — regularizá tu cuenta para mantener la tienda activa.
         </div>
       )}
       {/* Dynamic Style Overrides for Color Palette */}
@@ -1065,6 +1115,7 @@ export default function App() {
         activo={String(webSettings.splashActivo || "NO")}
       />
       <Toast toasts={toasts} removeToast={removeToast} />
+      <InstallPWA />
 
       {/* Cart Slider drawer */}
       <CartDrawer
@@ -1121,33 +1172,106 @@ export default function App() {
             </div>
           </div>
 
-          {/* Filter options and search bar located above the catalog */}
-          <div className="space-y-6">
-            {/* Main row: Search Input & quick sort controls */}
-            <div className="bg-[#0F0F0F] p-4 rounded-2xl border border-white/10 flex flex-col md:flex-row gap-4 items-center justify-between">
-              {/* Search input with live text typing */}
-              <div className="relative w-full md:max-w-md">
-                <input
-                  type="text"
-                  placeholder="🔍 Buscar productos por nombre o descripción..."
-                  value={catalogSearch}
-                  onChange={(e) => setCatalogSearch(e.target.value)}
-                  className="w-full text-xs bg-[#151515] text-white rounded-xl border border-white/10 px-4 py-3 focus:border-blue-500 focus:outline-none placeholder-slate-500 transition-colors font-medium"
-                  id="search-catalog-input"
-                />
-                {catalogSearch && (
-                  <button
-                    onClick={() => setCatalogSearch("")}
-                    className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white text-xs font-bold font-mono cursor-pointer"
-                  >
-                    X
-                  </button>
-                )}
-              </div>
+          {/* Tres botones: Buscar / Categorías / Filtros + Limpiar */}
+          <div className="space-y-4">
+            <div className="grid grid-cols-3 gap-2 sm:flex sm:flex-wrap sm:gap-2.5">
+              <button
+                onClick={() => { setShowSearchBox((v) => !v); setShowCategoriesBox(false); setShowFiltersBox(false); }}
+                className={`text-xs px-4 py-3 rounded-xl font-bold transition-all cursor-pointer border ${showSearchBox ? "bg-blue-600 border-blue-500 text-white shadow-lg shadow-blue-500/25" : "bg-[#0F0F0F] text-slate-300 border-white/10 hover:bg-[#151515] hover:text-white"}`}
+                id="btn-toggle-search"
+              >
+                🔍 Buscar
+              </button>
+              <button
+                onClick={() => { setShowCategoriesBox((v) => !v); setShowSearchBox(false); setShowFiltersBox(false); }}
+                className={`text-xs px-4 py-3 rounded-xl font-bold transition-all cursor-pointer border ${showCategoriesBox || selectedCategory !== "Todos" ? "bg-blue-600 border-blue-500 text-white shadow-lg shadow-blue-500/25" : "bg-[#0F0F0F] text-slate-300 border-white/10 hover:bg-[#151515] hover:text-white"}`}
+                id="btn-toggle-cats"
+              >
+                🗂 Categorías{selectedCategory !== "Todos" ? `: ${selectedCategory}` : ""}
+              </button>
+              <button
+                onClick={() => { setShowFiltersBox((v) => !v); setShowSearchBox(false); setShowCategoriesBox(false); }}
+                className={`text-xs px-4 py-3 rounded-xl font-bold transition-all cursor-pointer border ${showFiltersBox || sortBy !== "default" ? "bg-blue-600 border-blue-500 text-white shadow-lg shadow-blue-500/25" : "bg-[#0F0F0F] text-slate-300 border-white/10 hover:bg-[#151515] hover:text-white"}`}
+                id="btn-toggle-filters"
+              >
+                🎛 Filtros
+              </button>
+              {(catalogSearch || selectedCategory !== "Todos" || sortBy !== "default" || filterDiscount || filterStock) && (
+                <button
+                  onClick={() => {
+                    setSelectedCategory("Todos");
+                    setSortBy("default");
+                    setCatalogSearch("");
+                    setFilterDiscount(false);
+                    setFilterStock(false);
+                    setShowSearchBox(false);
+                    setShowCategoriesBox(false);
+                    setShowFiltersBox(false);
+                    showToast("Filtros restablecidos.", "info");
+                  }}
+                  className="col-span-3 sm:col-span-1 text-xs font-bold px-4 py-3 rounded-xl border bg-rose-600/10 text-rose-400 border-rose-500/20 hover:bg-rose-600/20 transition-all cursor-pointer"
+                  id="btn-clear-filters"
+                >
+                  🧹 Limpiar
+                </button>
+              )}
+            </div>
 
-              {/* Flex action options */}
-              <div className="flex flex-wrap gap-2.5 items-center w-full md:w-auto">
-                {/* Sort selector */}
+            {showSearchBox && (
+              <div className="bg-[#0F0F0F] p-4 rounded-2xl border border-white/10 animate-slide-in-down">
+                <div className="relative w-full">
+                  <input
+                    type="text"
+                    autoFocus
+                    placeholder="🔍 Buscar productos por nombre o descripción..."
+                    value={catalogSearch}
+                    onChange={(e) => setCatalogSearch(e.target.value)}
+                    className="w-full text-xs bg-[#151515] text-white rounded-xl border border-white/10 px-4 py-3 focus:border-blue-500 focus:outline-none placeholder-slate-500 transition-colors font-medium"
+                    id="search-catalog-input"
+                  />
+                  {catalogSearch && (
+                    <button
+                      onClick={() => setCatalogSearch("")}
+                      className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white text-xs font-bold font-mono cursor-pointer"
+                    >
+                      X
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {showCategoriesBox && (
+              <div className="bg-[#0F0F0F] p-4 rounded-2xl border border-blue-500/25 shadow-xl animate-slide-in-down" role="dialog" aria-label="Categorías">
+                <span className="block text-[11px] font-mono text-slate-400 uppercase tracking-wider font-extrabold leading-none mb-3">
+                  Seleccionar Categoría
+                </span>
+                <div className="flex flex-wrap gap-2 max-h-64 overflow-y-auto">
+                  {categoriesList.map((cat) => (
+                    <button
+                      key={cat}
+                      onClick={() => { setSelectedCategory(cat); setShowCategoriesBox(false); }}
+                      className={`text-xs px-4 py-2.5 rounded-xl font-bold transition-all cursor-pointer border ${
+                        selectedCategory === cat
+                          ? "bg-blue-600 border-blue-500 text-white shadow-lg shadow-blue-500/25"
+                          : "bg-[#151515] text-slate-300 border-white/10 hover:bg-[#1c1c1c] hover:text-white"
+                      }`}
+                      id={`btn-cat-sel-${cat}`}
+                    >
+                      {cat}
+                      <span className={`text-[10px] font-mono font-bold whitespace-nowrap px-2 py-0.5 rounded-full ml-2 ${
+                        selectedCategory === cat ? "bg-white/20 text-white" : "bg-white/5 text-slate-400"
+                      }`}>
+                        {cat === "Todos" ? allProducts.length : allProducts.filter((p) => p.category === cat).length}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {showFiltersBox && (
+              <div className="bg-[#0F0F0F] p-4 rounded-2xl border border-white/10 flex flex-col md:flex-row gap-4 items-stretch md:items-center animate-slide-in-down">
                 <div className="flex items-center gap-2 bg-[#151515] px-3.5 py-2.5 rounded-xl border border-white/10">
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Orden:</span>
                   <select
@@ -1163,8 +1287,6 @@ export default function App() {
                     <option value="newest" className="bg-[#111111] text-white">Novedades</option>
                   </select>
                 </div>
-
-                {/* Pagination size options */}
                 <div className="flex items-center gap-2 bg-[#151515] px-3.5 py-2.5 rounded-xl border border-white/10">
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Ver por pág:</span>
                   <select
@@ -1178,50 +1300,8 @@ export default function App() {
                     <option value={100} className="bg-[#111111] text-white">100 art.</option>
                   </select>
                 </div>
-
-                {(catalogSearch || selectedCategory !== "Todos" || sortBy !== "default") && (
-                  <button
-                    onClick={() => {
-                      setSelectedCategory("Todos");
-                      setSortBy("default");
-                      setCatalogSearch("");
-                      showToast("Filtros restablecidos.", "info");
-                    }}
-                    className="text-xs font-bold px-4 py-2.5 rounded-xl border bg-rose-600/10 text-rose-400 border-rose-500/20 hover:bg-rose-600/20 transition-all cursor-pointer"
-                  >
-                    Limpiar
-                  </button>
-                )}
               </div>
-            </div>
-
-            {/* Direct Category Buttons ("Sueltas" & Always Visible) */}
-            <div className="space-y-3.5">
-              <span className="block text-[11px] font-mono text-slate-400 uppercase tracking-wider font-extrabold leading-none">
-                Seleccionar Categoría
-              </span>
-              <div className="flex flex-wrap gap-2">
-                {categoriesList.map((cat) => (
-                  <button
-                    key={cat}
-                    onClick={() => setSelectedCategory(cat)}
-                    className={`text-xs px-4 py-2.5 rounded-xl font-bold transition-all cursor-pointer border ${
-                      selectedCategory === cat
-                        ? "bg-blue-600 border-blue-500 text-white shadow-lg shadow-blue-500/25"
-                        : "bg-[#0F0F0F] text-slate-300 border-white/10 hover:bg-[#151515] hover:text-white"
-                    }`}
-                    id={`btn-cat-sel-${cat}`}
-                  >
-                    {cat}
-                    <span className={`text-[10px] font-mono font-bold whitespace-nowrap px-2 py-0.5 rounded-full ml-2 ${
-                      selectedCategory === cat ? "bg-white/20 text-white" : "bg-white/5 text-slate-400"
-                    }`}>
-                      {cat === "Todos" ? allProducts.length : allProducts.filter((p) => p.category === cat).length}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </div>
+            )}
           </div>
 
           {/* Right Products feed block containing the list */}
@@ -1408,7 +1488,7 @@ export default function App() {
                   <div className="border-t border-white/5 pt-3.5 mt-5 space-y-3.5">
                     <div className="flex items-center justify-between text-[11px] font-bold">
                       <span className="text-white truncate max-w-[130px]">{r.name}</span>
-                      <span className="text-slate-500 font-medium shrink-0">{r.date}</span>
+                      <span className="text-slate-500 font-medium shrink-0">{formatearFechaES(r.date)}</span>
                     </div>
 
                     {matchedProduct && (
@@ -1477,6 +1557,7 @@ export default function App() {
         onSubscribeNewsletter={handleSubscribeNewsletter} 
         onAdminClick={() => setShowAdminPortal(true)}
         nombreWeb={webSettings.nombreWeb}
+        slogan={webSettings.slogan}
         logoUrl={webSettings.logoUrl}
         direccion={webSettings.direccion}
         contactoMinorista={webSettings.contactoMinorista}
@@ -1500,7 +1581,7 @@ export default function App() {
             localStorage.setItem("mx_products", JSON.stringify(prods));
           }}
           webSettings={webSettings}
-          onUpdateSettings={(settings) => {
+          onupdateConfig={(settings) => {
             setWebSettings(settings);
             localStorage.setItem("mx_settings", JSON.stringify(settings));
           }}

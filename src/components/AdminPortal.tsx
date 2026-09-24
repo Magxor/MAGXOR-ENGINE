@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { 
   X, Lock, User, Users, Check, AlertTriangle, RefreshCw, Smartphone, 
@@ -7,8 +7,12 @@ import {
   LayoutList, Grid, LayoutGrid, Filter, Bell, Image
 } from "lucide-react";
 import { parseCSV, submitToAppsScript, formatPrice } from "../utils";
+import { formatearFechaES, formatearHoraES, splitFechaHora } from "../lib/fecha";
 import { api, isEndpointConfigured, sessionSet, sessionGet } from "../lib/api";
 import { Product } from "../types";
+import { UserManagement } from "./UserManagement";
+import OrderClientsCards from "./OrderClientsCards";
+import OrderCardsTab from "./OrderCardsTab";
 import { motion, AnimatePresence } from "motion/react";
 
 // Web Audio API pure synthesizer to chime on new orders without external audio files
@@ -128,294 +132,9 @@ const parseOrderDate = (fechaStr: string): Date => {
   return new Date();
 };
 
-const APPS_SCRIPT_TEMPLATE = `// MAGXOR ENGINE — Usa apps-script/Code.gs de este repo (versión segura con READ_TOKEN + login servidor).
-// Pasos: crea un Google Sheet NUEVO (privado) > Extensiones > Apps Script > pega Code.gs >
-// ejecuta setupMagxor() > crearAdmin("admin","CLAVE") > Implementar > Aplicación web (Yo/Cualquiera).
-// Luego configura VITE_APPS_SCRIPT_URL + VITE_READ_TOKEN en .env. El Sheet NO se publica en la web.
-// (Plantilla legacy sin auth eliminada por seguridad. Ver apps-script/README_SETUP.md)
-function doGet(e) {
-  return handleRequest(e);
-}
-
-function doPost(e) {
-  return handleRequest(e);
-}
-
-function handleRequest(e) {
-  var params = {};
-  if (e && e.parameter) {
-    for (var key in e.parameter) {
-      params[key] = e.parameter[key];
-    }
-  }
-  if (e && e.postData && e.postData.contents) {
-    try {
-      var json = JSON.parse(e.postData.contents);
-      for (var key in json) {
-        params[key] = json[key];
-      }
-    } catch(err) {}
-  }
-  
-  var action = params.action;
-  var sheet = SpreadsheetApp.getActiveSpreadsheet();
-  
-  if (action === "addReview") {
-    var reviewsSheet = sheet.getSheetByName("RESEÑAS");
-    if (!reviewsSheet) {
-      reviewsSheet = sheet.insertSheet("RESEÑAS");
-      reviewsSheet.appendRow(["productId", "name", "rating", "comment", "date"]);
-    }
-    reviewsSheet.appendRow([
-      params.productId || "",
-      params.name || "Cliente",
-      parseInt(params.rating) || 5,
-      params.comment || "",
-      params.date || "Hace poco"
-    ]);
-  } else if (action === "addClient") {
-    var clientsSheet = sheet.getSheetByName("CLIENTES");
-    if (!clientsSheet) {
-      clientsSheet = sheet.insertSheet("CLIENTES");
-      clientsSheet.appendRow(["PHONE", "DATE", "METODO", "CONTACTO"]);
-    }
-    clientsSheet.appendRow([
-      params.phone || "",
-      params.date || "",
-      params.metodo || "Club WhatsApp",
-      params.contacto || "NO"
-    ]);
-  } else if (action === "updateClientContact") {
-    var clientsSheet = sheet.getSheetByName("CLIENTES");
-    if (clientsSheet) {
-      var data = clientsSheet.getDataRange().getValues();
-      var headers = data[0];
-      var phoneCol = -1;
-      var contactoCol = -1;
-      for (var c = 0; c < headers.length; c++) {
-        var h = String(headers[c]).toLowerCase().trim();
-        if (h === "phone" || h === "telefono" || h === "teléfono" || h === "celular" || h === "client" || h === "numero" || h === "número") {
-          phoneCol = c;
-        } else if (h === "contacto" || h === "contactado") {
-          contactoCol = c;
-        }
-      }
-      if (phoneCol === -1) phoneCol = 0;
-      
-      var targetPhone = String(params.phone).trim();
-      for (var r = 1; r < data.length; r++) {
-        var rowPhone = String(data[r][phoneCol]).trim();
-        if (rowPhone === targetPhone || rowPhone.replace(/[^0-9]/g, "") === targetPhone.replace(/[^0-9]/g, "")) {
-          if (contactoCol !== -1) {
-            clientsSheet.getRange(r + 1, contactoCol + 1).setValue(params.contacto || "SI");
-          }
-          break;
-        }
-      }
-    }
-  } else if (action === "deleteClient") {
-    var clientsSheet = sheet.getSheetByName("CLIENTES");
-    if (clientsSheet) {
-      var data = clientsSheet.getDataRange().getValues();
-      var headers = data[0];
-      var phoneCol = -1;
-      for (var c = 0; c < headers.length; c++) {
-        var h = String(headers[c]).toLowerCase().trim();
-        if (h === "phone" || h === "telefono" || h === "teléfono" || h === "celular" || h === "client" || h === "numero" || h === "número") {
-          phoneCol = c;
-          break;
-        }
-      }
-      if (phoneCol === -1) phoneCol = 0;
-      var targetPhone = String(params.phone).trim();
-      for (var r = 1; r < data.length; r++) {
-        var rowPhone = String(data[r][phoneCol]).trim();
-        if (rowPhone === targetPhone || rowPhone.replace(/[^0-9]/g, "") === targetPhone.replace(/[^0-9]/g, "")) {
-          clientsSheet.deleteRow(r + 1);
-          break;
-        }
-      }
-    }
-  } else if (action === "addOrder") {
-    var ordersSheet = sheet.getSheetByName("PEDIDOS");
-    if (!ordersSheet) {
-      ordersSheet = sheet.insertSheet("PEDIDOS");
-      ordersSheet.appendRow(["ID", "FECHA", "CLIENTE", "TELEFONO", "PRODUCTOS", "TOTAL", "ENTREGA", "ESTADO"]);
-    }
-    ordersSheet.appendRow([
-      params.id || "",
-      params.fecha || "",
-      params.cliente || "",
-      params.telefono || "",
-      params.productos || "",
-      parseFloat(params.total) || 0,
-      params.entrega || "",
-      params.estado || "PENDIENTE"
-    ]);
-  } else if (action === "updateOrderStatus") {
-    var ordersSheet = sheet.getSheetByName("PEDIDOS");
-    if (ordersSheet) {
-      var data = ordersSheet.getDataRange().getValues();
-      var headers = data[0];
-      var idCol = -1;
-      var estadoCol = -1;
-      for (var c = 0; c < headers.length; c++) {
-        var h = String(headers[c]).toLowerCase().trim();
-        if (h === "id" || h === "codigo" || h === "código" || h === "pedido") {
-          idCol = c;
-        } else if (h === "estado" || h === "status") {
-          estadoCol = c;
-        }
-      }
-      if (idCol === -1) idCol = 0;
-      var targetId = String(params.id).trim();
-      for (var r = 1; r < data.length; r++) {
-        if (String(data[r][idCol]).trim() === targetId) {
-          if (estadoCol !== -1) {
-            ordersSheet.getRange(r + 1, estadoCol + 1).setValue(params.estado || "PENDIENTE");
-          }
-          break;
-        }
-      }
-    }
-  } else if (action === "deleteOrder") {
-    var ordersSheet = sheet.getSheetByName("PEDIDOS");
-    if (ordersSheet) {
-      var data = ordersSheet.getDataRange().getValues();
-      var headers = data[0];
-      var idCol = -1;
-      for (var c = 0; c < headers.length; c++) {
-        var h = String(headers[c]).toLowerCase().trim();
-        if (h === "id" || h === "codigo" || h === "código" || h === "pedido") {
-          idCol = c;
-          break;
-        }
-      }
-      if (idCol === -1) idCol = 0;
-      var targetId = String(params.id).trim();
-      for (var r = 1; r < data.length; r++) {
-        if (String(data[r][idCol]).trim() === targetId) {
-          ordersSheet.deleteRow(r + 1);
-          break;
-        }
-      }
-    }
-  } else if (action === "updateSettings") {
-    var datosSheet = sheet.getSheetByName("DATOS");
-    if (!datosSheet) {
-      datosSheet = sheet.insertSheet("DATOS");
-      datosSheet.appendRow(["NOMBRE WEB", "HORARIOS", "DIRECCIÓN", "CONTACTO MINORISTA", "CONTACTO MAYORISTA", "CONTACTO TICKET", "PALETA DE COLORES", "ANUNCIO HEADER", "ENDPOINT APPS SCRIPT"]);
-    }
-    var numRows = datosSheet.getLastRow();
-    if (numRows > 1) {
-      datosSheet.deleteRows(2, numRows - 1);
-    }
-    datosSheet.appendRow([
-      params.nombre_web || "",
-      params.horarios || "",
-      params.direccion || "",
-      params.contacto_minorista || "",
-      params.contacto_mayorista || "",
-      params.contacto_ticket || "",
-      params.paleta_colores || "",
-      params.anuncio_header || "",
-      params.endpoint_apps_script || ""
-    ]);
-  } else if (action === "addProduct") {
-    var invSheet = sheet.getSheetByName("INVENTARIO");
-    if (!invSheet) {
-      invSheet = sheet.getSheetByName("PRODUCTOS");
-    }
-    if (!invSheet) {
-      invSheet = sheet.insertSheet("INVENTARIO");
-      invSheet.appendRow(["Id", "Nombre de Producto", "Categoría", "Descripción", "Precio", "Precio Oferta", "Disponible", "Oferta", "Fotos"]);
-    }
-    invSheet.appendRow([
-      params.id || "",
-      params.nombre || "",
-      params.categoria || "",
-      params.descripcion || "",
-      params.precio || "",
-      params.precio_oferta || "",
-      params.disponible || "SI",
-      params.oferta || "NO",
-      params.fotos || ""
-    ]);
-  } else if (action === "updateProduct") {
-    var invSheet = sheet.getSheetByName("INVENTARIO") || sheet.getSheetByName("PRODUCTOS");
-    if (invSheet) {
-      var data = invSheet.getDataRange().getValues();
-      var idCol = -1;
-      var headers = data[0];
-      for (var c = 0; c < headers.length; c++) {
-        var h = String(headers[c]).toLowerCase().trim();
-        if (h === "id" || h === "codigo" || h === "código" || h === "sku") {
-          idCol = c;
-          break;
-        }
-      }
-      if (idCol === -1) idCol = 0;
-      var targetId = String(params.id).toLowerCase().trim();
-      var foundRow = -1;
-      for (var r = 1; r < data.length; r++) {
-        if (String(data[r][idCol]).toLowerCase().trim() === targetId) {
-          foundRow = r + 1;
-          break;
-        }
-      }
-      var mapCols = {};
-      for (var c = 0; c < headers.length; c++) {
-        var h = String(headers[c]).toLowerCase().trim();
-        if (h === "id" || h === "codigo" || h === "código" || h === "sku") mapCols["id"] = c;
-        else if (h.includes("nombre") || h === "producto" || h === "name" || h === "title") mapCols["nombre"] = c;
-        else if (h.includes("categor") || h === "category" || h === "rubro") mapCols["categoria"] = c;
-        else if (h.includes("descrip") || h === "description" || h === "detalle") mapCols["descripcion"] = c;
-        else if (h === "precio" || h === "price" || h === "valor" || h === "costo") mapCols["precio"] = c;
-        else if (h === "precio oferta" || h === "precio_oferta" || h === "oferta precio" || h === "oferta_precio") mapCols["precio_oferta"] = c;
-        else if (h.includes("dispon") || h === "stock" || h === "cantidad") mapCols["disponible"] = c;
-        else if (h === "oferta" || h.includes("promo") || h === "en oferta") mapCols["oferta"] = c;
-        else if (h === "fotos" || h === "foto" || h === "imagen" || h === "image") mapCols["fotos"] = c;
-      }
-      if (foundRow !== -1) {
-        if (mapCols["nombre"] !== undefined && params.nombre !== undefined) invSheet.getRange(foundRow, mapCols["nombre"] + 1).setValue(params.nombre);
-        if (mapCols["categoria"] !== undefined && params.categoria !== undefined) invSheet.getRange(foundRow, mapCols["categoria"] + 1).setValue(params.categoria);
-        if (mapCols["descripcion"] !== undefined && params.descripcion !== undefined) invSheet.getRange(foundRow, mapCols["descripcion"] + 1).setValue(params.descripcion);
-        if (mapCols["precio"] !== undefined && params.precio !== undefined) invSheet.getRange(foundRow, mapCols["precio"] + 1).setValue(params.precio);
-        if (mapCols["precio_oferta"] !== undefined && params.precio_oferta !== undefined) invSheet.getRange(foundRow, mapCols["precio_oferta"] + 1).setValue(params.precio_oferta);
-        if (mapCols["disponible"] !== undefined && params.disponible !== undefined) invSheet.getRange(foundRow, mapCols["disponible"] + 1).setValue(params.disponible);
-        if (mapCols["oferta"] !== undefined && params.oferta !== undefined) invSheet.getRange(foundRow, mapCols["oferta"] + 1).setValue(params.oferta);
-        if (mapCols["fotos"] !== undefined && params.fotos !== undefined) invSheet.getRange(foundRow, mapCols["fotos"] + 1).setValue(params.fotos);
-      }
-    }
-  } else if (action === "deleteProduct") {
-    var invSheet = sheet.getSheetByName("INVENTARIO") || sheet.getSheetByName("PRODUCTOS");
-    if (invSheet) {
-      var data = invSheet.getDataRange().getValues();
-      var idCol = -1;
-      var headers = data[0];
-      for (var c = 0; c < headers.length; c++) {
-        var h = String(headers[c]).toLowerCase().trim();
-        if (h === "id" || h === "codigo" || h === "código" || h === "sku") {
-          idCol = c;
-          break;
-        }
-      }
-      if (idCol === -1) idCol = 0;
-      var targetId = String(params.id).toLowerCase().trim();
-      for (var r = 1; r < data.length; r++) {
-        if (String(data[r][idCol]).toLowerCase().trim() === targetId) {
-          invSheet.deleteRow(r + 1);
-          break;
-        }
-      }
-    }
-  }
-  
-  var response = { status: "success", action: action };
-  return ContentService.createTextOutput(JSON.stringify(response))
-    .setMimeType(ContentService.MimeType.JSON)
-    .addHeader("Access-Control-Allow-Origin", "*");
-}`;
+import appsScriptCode from "../../apps-script/Code.gs?raw";
+// Código completo listo para copiar: se importa del backend real del repo (una sola fuente).
+const APPS_SCRIPT_TEMPLATE: string = appsScriptCode;
 
 interface InlinePriceInputProps {
   initialValue: number;
@@ -477,7 +196,7 @@ interface AdminPortalProps {
     anuncioHeader?: string;
     endpointAppsScript?: string;
   };
-  onUpdateSettings: (settings: any) => void;
+  onupdateConfig: (settings: any) => void;
   showToast: (text: string, type?: "success" | "info" | "error") => void;
 }
 
@@ -490,7 +209,7 @@ export default function AdminPortal({
   allProducts,
   onUpdateProducts,
   webSettings,
-  onUpdateSettings,
+  onupdateConfig,
   showToast
 }: AdminPortalProps) {
   // Unique categories list derived dynamically
@@ -509,16 +228,49 @@ export default function AdminPortal({
   const [errorMessage, setErrorMessage] = useState("");
   const [isPausado, setIsPausado] = useState(false);
   const [isAtraso, setIsAtraso] = useState(false);
+  const [userRole, setUserRole] = useState(() => localStorage.getItem("mx_admin_role") || "ADMINISTRADOR");
+  // Modales de media pantalla por estado de cuenta
+  const [welcomeInfo, setWelcomeInfo] = useState<{ user: string; pendientes: number; nuevos: number } | null>(null);
+  const [showAtrasoModal, setShowAtrasoModal] = useState(false);
+  const [showPausadoModal, setShowPausadoModal] = useState(false);
+  // Forzar cambio de credenciales default del ADMINISTRADOR
+  const [forceCredChange, setForceCredChange] = useState(false);
+  const [newAdminUser, setNewAdminUser] = useState("");
+  const [newAdminPass, setNewAdminPass] = useState("");
+  const [isSavingCreds, setIsSavingCreds] = useState(false);
   
   const [isLoggedIn, setIsLoggedIn] = useState(() => {
-    return localStorage.getItem("mx_admin_logged") === "true";
+    const isLogged = localStorage.getItem("mx_admin_logged") === "true";
+    if (isEndpointConfigured()) {
+      const hasSession = !!sessionGet();
+      if (!hasSession && isLogged) {
+        localStorage.removeItem("mx_admin_logged");
+        localStorage.removeItem("mx_admin_user");
+        return false;
+      }
+      return hasSession && isLogged;
+    }
+    return isLogged;
   });
   const [adminUser, setAdminUser] = useState(() => {
     return localStorage.getItem("mx_admin_user") || "";
   });
 
   // Navigation state
-  const [activeTab, setActiveTab ] = useState<"metrics" | "inventory" | "settings" | "clients" | "orders">("metrics");
+  const [activeTab, setActiveTab ] = useState<"metrics" | "inventory" | "settings" | "clients" | "orders" | "users" | "configdb">("metrics");
+  // Roles: DESARROLLADOR (full) > ADMINISTRADOR (todo menos código/dev) > USUARIO (solo ver pedidos+clientes)
+  const isUsuario = userRole === "USUARIO";
+  const isDev = userRole === "DESARROLLADOR";
+  useEffect(() => {
+    if (isUsuario && activeTab !== "clients" && activeTab !== "orders") {
+      setActiveTab("orders");
+    }
+  }, [isUsuario, activeTab]);
+  // Al cambiar de pantalla, la sección CONFIGURACION vuelve a bloquearse
+  useEffect(() => {
+    setIsDbUnlocked(false);
+    setIsDbCollapsibleOpen(false);
+  }, [activeTab]);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [logoLoaded, setLogoLoaded] = useState(false);
   const [logoError, setLogoError] = useState(false);
@@ -646,7 +398,7 @@ export default function AdminPortal({
 
   // Custom added states for requested reforms
   const [showOrderFilters, setShowOrderFilters] = useState(false);
-  const [billingPeriod, setBillingPeriod] = useState<"hoy" | "7dias" | "30dias" | "personalizado">("30dias");
+  const [billingPeriod, setBillingPeriod] = useState<"hoy" | "7dias" | "personalizado" | "siempre">("7dias");
   const [customStartDate, setCustomStartDate] = useState("");
   const [customEndDate, setCustomEndDate] = useState("");
   const [newOrderPopupData, setNewOrderPopupData] = useState<OrderItem | null>(null);
@@ -771,12 +523,33 @@ export default function AdminPortal({
   // --- LECTURAS ADMIN: endpoint con sesión primero, CSV legacy como fallback ---
   const adminRead = async <T,>(action: "listOrders" | "listClients"): Promise<T[] | null> => {
     if (isEndpointConfigured()) {
+      const sess = sessionGet();
+      if (!sess) {
+        return null;
+      }
       try {
-        const res = await api.admin(sessionGet(), action);
+        let res: any;
+        if (action === "listClients") {
+          res = await api.listClients(sess);
+        } else {
+          res = await api.listOrders(sess);
+        }
         const key = action === "listOrders" ? "orders" : "clients";
         return (res[key] as T[]) || [];
-      } catch (e) {
+      } catch (e: any) {
         console.error(`adminRead ${action} falló:`, e);
+        const errMsg = String(e?.message || e || "");
+        // Solo se cierra sesión cuando el servidor confirma expiración real.
+        // "Sesión requerida" y errores de red son transitorios (redirect Apps
+        // Script) y NO deben desloguear: se reintenta en el próximo ciclo.
+        if (errMsg.includes("Sesión expirada")) {
+          sessionSet("");
+          localStorage.removeItem("mx_admin_logged");
+          localStorage.removeItem("mx_admin_user");
+          localStorage.removeItem("mx_admin_role");
+          setIsLoggedIn(false);
+          showToast("Tu sesión ha expirado. Por favor, iniciá sesión de nuevo.", "error");
+        }
         return null;
       }
     }
@@ -784,6 +557,7 @@ export default function AdminPortal({
   };
 
   const handleUpdateOrderStatus = async (id: string, nextEstado: string) => {
+    if (isUsuario) { showToast("Tu rol USUARIO no puede modificar pedidos.", "error"); return; }
     // Optimistic UI update
     setOrders(prev => prev.map(o => o.id === id ? { ...o, estado: nextEstado } : o));
 
@@ -804,8 +578,8 @@ export default function AdminPortal({
     }
   };
 
-  const handleDeleteOrder = async (id: string) => {
-    // Optimistic UI update
+  const handleDeleteOrder = async (id: string) => {    // Optimistic UI update
+    if (isUsuario) { showToast("Tu rol USUARIO no puede eliminar nada.", "error"); return; }
     setOrders(prev => prev.filter(o => o.id !== id));
     showToast("Pedido eliminado de la lista local", "info");
 
@@ -825,6 +599,20 @@ export default function AdminPortal({
     }
   };
 
+  // Guarda el detalle editado de un pedido (falta de stock / cantidades)
+  const handleSaveOrderDetail = async (id: string, productos: string, total: number) => {
+    if (isUsuario) { showToast("Tu rol USUARIO no puede modificar pedidos.", "error"); return; }
+    setOrders(prev => prev.map(o => o.id === id ? { ...o, productos, total } : o));
+    try {
+      const success = await adminWrite({ action: "updateOrderDetail", id, productos, total });
+      if (success) showToast("Detalle del pedido actualizado.", "success");
+      else showToast("Guardado local, falló la sincronización.", "error");
+    } catch (err) {
+      console.error(err);
+      showToast("Error de conexión al guardar detalle.", "error");
+    }
+  };
+
   useEffect(() => {
     if (isLoggedIn) {
       if (activeTab === "clients") {
@@ -838,12 +626,15 @@ export default function AdminPortal({
         fetchClients(true);
       }
       
-      // Auto-refresh every 5 seconds for background tracking of orders AND clients
+      // Auto-refresh escalonado cada 25s (evita saturar el redirect de Apps
+      // Script y pestaña oculta no consulta). Suficiente para detectar
+      // pedidos/clientes nuevos con sonido + toast.
       const interval = setInterval(() => {
-        fetchOrders(true);  // silent background fetch
-        fetchClients(true); // silent background fetch
-      }, 5000);
-      
+        if (document.hidden) return;
+        fetchOrders(true); // silent background fetch
+        setTimeout(() => { if (!document.hidden) fetchClients(true); }, 4000);
+      }, 25000);
+
       return () => clearInterval(interval);
     }
   }, [isLoggedIn, activeTab, sheetsUrl]);
@@ -905,6 +696,7 @@ export default function AdminPortal({
   // Settings Form States
   const [formData, setFormData] = useState({
     nombreWeb: webSettings.nombreWeb,
+    slogan: (webSettings as Record<string, string>).slogan || "",
     horarios: webSettings.horarios,
     direccion: webSettings.direccion,
     contactoMinorista: webSettings.contactoMinorista,
@@ -912,11 +704,39 @@ export default function AdminPortal({
     contactoTicket: webSettings.contactoTicket || webSettings.contactoMinorista || "5493584164396",
     paletaColores: webSettings.paletaColores,
     anuncioHeader: webSettings.anuncioHeader || "🔥 Obtené una Tienda como Está!!",
+    logoUrl: (webSettings as Record<string, string>).logoUrl || "",
+    faviconUrl: (webSettings as Record<string, string>).faviconUrl || "",
+    logoAnimadoUrl: (webSettings as Record<string, string>).logoAnimadoUrl || "",
     endpointAppsScript: webSettings.endpointAppsScript || ""
   });
+  // Subidas a imgbb (siempre WebP) para logo / favicon / portada splash
+  const [isUploadingLogo, setIsUploadingLogo] = useState(false);
+  const [isUploadingFavicon, setIsUploadingFavicon] = useState(false);
+  const [isUploadingSplash, setIsUploadingSplash] = useState(false);
+
+  const uploadMediaToImgbb = async (file: File, kind: "logo" | "favicon" | "splash"): Promise<string> => {
+    const { convertMediaToWebp, convertToWebp } = await import("../lib/image");
+    const conv = kind === "splash"
+      ? await convertMediaToWebp(file, { maxVideoSeconds: 10 })
+      : await convertToWebp(file, { maxSide: kind === "favicon" ? 512 : 1024, quality: 0.85 });
+    const fd = new FormData();
+    fd.append("image", conv.file);
+    const tienda = String(formData.nombreWeb || "tienda").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+    fd.append("name", `${tienda}_${kind}_${Date.now()}.webp`);
+    const apiKey = (import.meta as unknown as { env: Record<string, string> }).env.VITE_IMGBB_API_KEY || "";
+    if (!apiKey) throw new Error("Falta VITE_IMGBB_API_KEY en el archivo .env");
+    const res = await fetch(`https://api.imgbb.com/1/upload?key=${apiKey}`, { method: "POST", body: fd });
+    if (!res.ok) throw new Error(`ImgBB respondió ${res.status}`);
+    const json = await res.json();
+    if (!json.success || !json.data?.display_url) throw new Error(json.error?.message || "ImgBB no devolvió URL.");
+    return String(json.data.display_url);
+  };
 
   const [localSheetsUrl, setLocalSheetsUrl] = useState(sheetsUrl);
   const [localBackendUrl, setLocalBackendUrl] = useState(backendUrl);
+  const [credUsername, setCredUsername] = useState(adminUser || "");
+  const [credPassword, setCredPassword] = useState("");
+  const [isChangingCreds, setIsChangingCreds] = useState(false);
 
   // Metrics Popups States
   const [metricsPopupType, setMetricsPopupType] = useState<"sales" | "products" | "billing" | null>(null);
@@ -951,6 +771,7 @@ export default function AdminPortal({
   useEffect(() => {
     setFormData({
       nombreWeb: webSettings.nombreWeb,
+      slogan: (webSettings as Record<string, string>).slogan || "",
       horarios: webSettings.horarios,
       direccion: webSettings.direccion,
       contactoMinorista: webSettings.contactoMinorista,
@@ -958,6 +779,9 @@ export default function AdminPortal({
       contactoTicket: webSettings.contactoTicket || webSettings.contactoMinorista || "5493584164396",
       paletaColores: webSettings.paletaColores,
       anuncioHeader: webSettings.anuncioHeader || "🔥 Obtené una Tienda como Está!!",
+      logoUrl: (webSettings as Record<string, string>).logoUrl || "",
+      faviconUrl: (webSettings as Record<string, string>).faviconUrl || "",
+      logoAnimadoUrl: (webSettings as Record<string, string>).logoAnimadoUrl || "",
       endpointAppsScript: webSettings.endpointAppsScript || ""
     });
   }, [webSettings]);
@@ -970,15 +794,6 @@ export default function AdminPortal({
     setLocalBackendUrl(backendUrl);
   }, [backendUrl]);
 
-  // Automatically trigger browser print dialog 600ms after opening any order ticket
-  useEffect(() => {
-    if (selectedOrderDetail) {
-      const timer = setTimeout(() => {
-        window.print();
-      }, 600);
-      return () => clearTimeout(timer);
-    }
-  }, [selectedOrderDetail]);
 
   // El Admin pass NUNCA se descarga al cliente: se verifica en servidor (verifyAdminPass).
   // (Se eliminó el fetch CSV de CREDENCIALES por seguridad.)
@@ -1016,11 +831,12 @@ export default function AdminPortal({
     }
   };
 
-  // 1. LOGIN HANDLER Validate against Sheet CREDENCIALES
+  // 1. LOGIN HANDLER Validate against Sheet CREDENCIALES (usuario o solo ADMIN PASS)
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!username.trim() || !password.trim()) {
-      setErrorMessage("Por favor, completá todos los campos.");
+    // Se permite iniciar sesión con solo el ADMIN PASS (sin usuario).
+    if (!password.trim()) {
+      setErrorMessage("Ingresá tu contraseña o tu ADMIN PASS.");
       return;
     }
 
@@ -1029,43 +845,90 @@ export default function AdminPortal({
     setIsPausado(false);
 
     try {
-      // Login seguro: valida en el servidor (Apps Script). Nunca descarga CREDENCIALES al cliente.
       if (isEndpointConfigured()) {
         const res = await api.login(username.trim(), password);
+        const loggedUser = res.user || username.trim() || "admin";
         sessionSet(res.session);
         localStorage.setItem("mx_admin_logged", "true");
-        localStorage.setItem("mx_admin_user", res.user || username.trim());
+        localStorage.setItem("mx_admin_user", loggedUser);
+        const rolRaw = String((res as unknown as { rol?: string }).rol || "ADMINISTRADOR").toUpperCase();
+        const rol = rolRaw === "ADMIN" ? "ADMINISTRADOR" : rolRaw;
+        localStorage.setItem("mx_admin_role", rol);
+        setUserRole(rol);
         setIsLoggedIn(true);
-        setAdminUser(res.user || username.trim());
+        setAdminUser(loggedUser);
         setPassword("");
+        // Conteos para el toast de bienvenida (no bloquean el login)
+        let pendientes = 0;
+        let nuevos = 0;
+        try {
+          const [oRes, cRes] = await Promise.all([
+            api.listOrders(res.session).catch(() => null),
+            api.listClients(res.session).catch(() => null),
+          ]);
+          const ords = (oRes?.orders || []) as { estado?: string }[];
+          pendientes = ords.filter((o) => String(o.estado || "").toUpperCase() === "PENDIENTE").length;
+          const clis = (cRes?.clients || []) as Record<string, string>[];
+          const weekAgo = Date.now() - 7 * 24 * 3600 * 1000;
+          nuevos = clis.filter((c) => {
+            const raw = String(c["DATE"] || c["FECHA"] || c["date"] || c["fecha"] || "");
+            const d = new Date(raw).getTime();
+            return !isNaN(d) && d >= weekAgo;
+          }).length;
+        } catch { /* conteos opcionales */ }
+        if ((res as unknown as { debeCambiarCredenciales?: boolean }).debeCambiarCredenciales) {
+          setForceCredChange(true);
+          setNewAdminUser(loggedUser === "admin" ? "" : loggedUser);
+          return;
+        }
         if (res.atraso) {
           setIsAtraso(true);
-          showToast("⚠️ Sesión iniciada con pago pendiente. Regularizá tu cuenta.", "error");
+          setShowAtrasoModal(true);
+          showToast("⚠️ Cuenta con pago pendiente: regularizá tu situación.", "error");
         } else {
           setIsAtraso(false);
-          showToast("¡Sesión iniciada con éxito!", "success");
+          setWelcomeInfo({ user: loggedUser, pendientes, nuevos });
+          showToast(`¡Bienvenido @${loggedUser}!`, "success");
+          if (pendientes > 0) {
+            showToast(`📦 Tienes ${pendientes} pedido${pendientes === 1 ? "" : "s"} pendiente${pendientes === 1 ? "" : "s"}.`, "warning");
+          }
+          if (nuevos > 0) {
+            showToast(`👥 Tienes ${nuevos} cliente${nuevos === 1 ? "" : "s"} nuevo${nuevos === 1 ? "" : "s"} esta semana.`, "info");
+          }
         }
         return;
       }
-      // Sin endpoint no hay login seguro: las credenciales en claro por CSV están prohibidas.
       throw new Error("Configura el endpoint Apps Script (VITE_APPS_SCRIPT_URL) para iniciar sesión de forma segura.");
 
-    } catch (err: any) {
-      setErrorMessage(err.message || "Error al autenticar.");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Error al autenticar.";
+      if (msg.includes("ESTADO_NO") || msg.includes("pausada") || msg.includes("Pausada")) {
+        setIsPausado(true);
+        setShowPausadoModal(true);
+        setErrorMessage("Cuenta pausada por falta de pago. Tu web seguirá activa, pero no podrás administrarla ni recibir pedidos.");
+      } else {
+        setErrorMessage(msg);
+      }
     } finally {
       setIsLoggingIn(false);
     }
   };
 
-  const handleLogout = () => {
+  const doLocalLogout = () => {
     localStorage.removeItem("mx_admin_logged");
     localStorage.removeItem("mx_admin_user");
-    try {
-      sessionStorage.removeItem("mx_admin_session");
-    } catch { /* noop */ }
+    localStorage.removeItem("mx_admin_role");
+    sessionSet("");
     setIsLoggedIn(false);
     setAdminUser("");
+    setUserRole("ADMINISTRADOR");
     setIsAtraso(false);
+    setWelcomeInfo(null);
+    setShowAtrasoModal(false);
+  };
+
+  const handleLogout = () => {
+    doLocalLogout();
     showToast("Sesión cerrada.", "info");
     onClose();
   };
@@ -1081,8 +944,9 @@ export default function AdminPortal({
       const finalEndpoint = localBackendUrl || backendUrl || formData.endpointAppsScript;
       if (activeUrl) {
         const params = {
-          action: "updateSettings",
+          action: "updateConfig",
           nombre_web: formData.nombreWeb,
+          slogan: formData.slogan,
           horarios: formData.horarios,
           direccion: formData.direccion,
           contacto_minorista: formData.contactoMinorista,
@@ -1090,6 +954,9 @@ export default function AdminPortal({
           contacto_ticket: formData.contactoTicket,
           paleta_colores: formData.paletaColores,
           anuncio_header: formData.anuncioHeader,
+          logo_url: formData.logoUrl,
+          favicon_url: formData.faviconUrl,
+          logo_animado_url: formData.logoAnimadoUrl,
           endpoint_apps_script: finalEndpoint
         };
         
@@ -1107,7 +974,7 @@ export default function AdminPortal({
       }
 
       // 2. Local Fallback is updated immediately to reflect instantly
-      onUpdateSettings({
+      onupdateConfig({
         ...formData,
         endpointAppsScript: finalEndpoint
       });
@@ -1123,6 +990,7 @@ export default function AdminPortal({
 
   // 3. PRODUCT FORM HANDLER (CREATE / UPDATE)
   const openNewProductForm = () => {
+    if (isUsuario) { showToast("Tu rol USUARIO solo permite ver pedidos y clientes.", "error"); return; }
     // Generate sequential ID based on last created product suffix
     let nextId = "1";
     if (allProducts && allProducts.length > 0) {
@@ -1178,6 +1046,7 @@ export default function AdminPortal({
   };
 
   const openEditProductForm = (product: Product) => {
+    if (isUsuario) { showToast("Tu rol USUARIO solo permite ver pedidos y clientes.", "error"); return; }
     const effectivePrice = product.isPromo ? (product.originalPrice || product.price) : product.price;
     const isAvailable = product.stock > 0 && product.price > 0;
     setProdForm({
@@ -1368,6 +1237,7 @@ export default function AdminPortal({
 
   // 4. REMOTE DELETE HANDLER
   const handleDeleteProduct = async (prodId: string) => {
+    if (isUsuario) { showToast("Tu rol USUARIO no puede eliminar nada.", "error"); return; }
     setDeletingProductId(prodId);
     setShowDeleteConfirmModal(true);
   };
@@ -1687,9 +1557,8 @@ export default function AdminPortal({
       const diffMs = now.getTime() - oDate.getTime();
       return diffMs >= 0 && diffMs <= 7 * 24 * 60 * 60 * 1000;
     }
-    if (billingPeriod === "30dias") {
-      const diffMs = now.getTime() - oDate.getTime();
-      return diffMs >= 0 && diffMs <= 30 * 24 * 60 * 60 * 1000;
+    if (billingPeriod === "siempre") {
+      return true;
     }
     if (billingPeriod === "personalizado") {
       if (!customStartDate) return true;
@@ -1709,6 +1578,22 @@ export default function AdminPortal({
     return sum + parseProductsString(o.productos).reduce((pSum, p) => pSum + p.qty, 0);
   }, 0);
   const billingTotalAmount = billingFilteredOrders.reduce((sum, o) => sum + o.total, 0);
+  // Total vendido (todo, no cancelado) vs total cobrado (entregado/confirmado)
+  const totalVendido = billingFilteredOrders.reduce((sum, o) => sum + o.total, 0);
+  const totalCobrado = billingFilteredOrders
+    .filter((o) => o.estado === "ENTREGADO" || o.estado === "CONFIRMADO")
+    .reduce((sum, o) => sum + o.total, 0);
+  // Fecha de última venta (no cancelada)
+  const ultimaVenta = (() => {
+    let best: Date | null = null;
+    let raw = "";
+    orders.forEach((o) => {
+      if (o.estado === "CANCELADO") return;
+      const d = parseOrderDate(o.fecha);
+      if (!best || d.getTime() > best.getTime()) { best = d; raw = o.fecha; }
+    });
+    return { date: best, raw };
+  })();
 
   const isAnyModalOpen = !!(
     showProductModal ||
@@ -1716,13 +1601,134 @@ export default function AdminPortal({
     newOrderPopupData ||
     newClientPopupData ||
     selectedOrderDetail ||
-    metricsPopupType
+    metricsPopupType ||
+    welcomeInfo ||
+    showAtrasoModal ||
+    showPausadoModal ||
+    forceCredChange
   );
+
+  // Guardián: si la cuenta pasa a NO con sesión iniciada → aviso + cierre de sesión.
+  // Usa sessionPing (liviano). Nunca desloguea por errores de red/transitorios.
+  useEffect(() => {
+    if (!isLoggedIn || !isEndpointConfigured()) return;
+    let alive = true;
+    const check = async () => {
+      if (document.hidden) return;
+      try {
+        const res = await api.sessionPing();
+        if (!alive) return;
+        const est = String(res.estadoCuenta || "SI").toUpperCase();
+        if (est === "NO") {
+          setShowPausadoModal(true);
+          doLocalLogout();
+        } else if (est === "ATRASO" || est === "ATRASADO") {
+          setIsAtraso(true);
+        } else {
+          setIsAtraso(false);
+        }
+      } catch (e: unknown) {
+        // Solo la expiración confirmada cierra la sesión; lo transitorio se ignora
+        if (!alive) return;
+        const msg = String((e as Error)?.message || e || "");
+        if (msg.includes("Sesión expirada")) {
+          setShowPausadoModal(false);
+          doLocalLogout();
+          showToast("Tu sesión ha expirado. Por favor, iniciá sesión de nuevo.", "error");
+        }
+      }
+    };
+    check();
+    const t = setInterval(check, 60000);
+    return () => { alive = false; clearInterval(t); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoggedIn]);
 
   if (!isOpen) return null;
 
+  const halfModal = "fixed inset-0 z-[80] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm";
+
   return (
     <div className={`fixed inset-0 z-50 ${isAnyModalOpen ? "overflow-hidden" : "overflow-y-auto"} flex flex-col`} style={{ minHeight: "100dvh" }}>
+      {/* Toast media pantalla: bienvenida SI (verde) */}
+      {welcomeInfo && createPortal(
+        <div className={halfModal} role="alert">
+          <div className="w-full max-w-md bg-emerald-950 border-2 border-emerald-500 rounded-3xl p-6 text-center shadow-2xl animate-scale-in">
+            <div className="w-14 h-14 mx-auto rounded-2xl bg-emerald-500 text-white flex items-center justify-center text-2xl font-black">✓</div>
+            <h3 className="text-lg font-black text-white mt-3">Bienvenido @{welcomeInfo.user}</h3>
+            <div className="mt-3 space-y-1.5 text-sm text-emerald-100">
+              <p>Tienes <strong>{welcomeInfo.pendientes} pedidos pendientes</strong>.</p>
+              <p>Tienes <strong>{welcomeInfo.nuevos} nuevos clientes</strong>.</p>
+              {(welcomeInfo.pendientes === 0 && welcomeInfo.nuevos === 0) && (
+                <p className="text-emerald-300/80 text-xs">Sin nuevos movimientos. Todo al día.</p>
+              )}
+            </div>
+            <button onClick={() => setWelcomeInfo(null)} className="mt-5 w-full py-3 bg-emerald-500 hover:bg-emerald-400 text-white font-extrabold text-sm rounded-xl cursor-pointer">Continuar</button>
+          </div>
+        </div>,
+        document.body
+      )}
+      {/* Toast media pantalla: ATRASADO (naranja) */}
+      {showAtrasoModal && createPortal(
+        <div className={halfModal} role="alert">
+          <div className="w-full max-w-md bg-amber-950 border-2 border-amber-500 rounded-3xl p-6 text-center shadow-2xl animate-scale-in">
+            <div className="w-14 h-14 mx-auto rounded-2xl bg-amber-500 text-black flex items-center justify-center"><AlertTriangle className="w-7 h-7" /></div>
+            <h3 className="text-lg font-black text-white mt-3">Tu Cuenta Puede ser Pausada por Falta de Pago</h3>
+            <p className="text-sm text-amber-200 mt-2">Regularizá tu cuenta con Magxor Engine para mantener la tienda activa.</p>
+            <button onClick={() => setShowAtrasoModal(false)} className="mt-5 w-full py-3 bg-amber-500 hover:bg-amber-400 text-black font-extrabold text-sm rounded-xl cursor-pointer">Aceptar</button>
+          </div>
+        </div>,
+        document.body
+      )}
+      {/* Toast media pantalla: NO (rojo) + cierra sesión */}
+      {showPausadoModal && createPortal(
+        <div className={halfModal} role="alert">
+          <div className="w-full max-w-md bg-red-950 border-2 border-red-500 rounded-3xl p-6 text-center shadow-2xl animate-scale-in">
+            <div className="w-14 h-14 mx-auto rounded-2xl bg-red-500 text-white flex items-center justify-center"><Lock className="w-7 h-7" /></div>
+            <h3 className="text-lg font-black text-white mt-3">Tu Cuenta Fue Pausada por Falta de Pago</h3>
+            <p className="text-sm text-red-200 mt-2">Cuenta pausada por falta de pago. Tu web seguirá activa, pero no podrás administrarla ni recibir pedidos.</p>
+            <button onClick={() => { setShowPausadoModal(false); doLocalLogout(); onClose(); }} className="mt-5 w-full py-3 bg-red-500 hover:bg-red-400 text-white font-extrabold text-sm rounded-xl cursor-pointer">Entendido</button>
+          </div>
+        </div>,
+        document.body
+      )}
+      {/* Popup obligatorio: cambiar credenciales default del ADMINISTRADOR */}
+      {forceCredChange && createPortal(
+        <div className={halfModal} role="alertdialog" aria-label="Cambiar credenciales">
+          <div className="w-full max-w-md bg-[#151515] border-2 border-blue-500 rounded-3xl p-6 shadow-2xl">
+            <h3 className="text-base font-black text-white text-center">Cambiá las credenciales de ADMINISTRADOR</h3>
+            <p className="text-xs text-slate-400 text-center mt-1">Estás usando las credenciales por defecto (admin / bienvenido). Cambialas para continuar.</p>
+            <div className="space-y-3 mt-4">
+              <input type="text" placeholder="Nuevo usuario (mín 3 car.)" value={newAdminUser} onChange={(e) => setNewAdminUser(e.target.value)} className="w-full text-xs bg-neutral-950 text-white rounded-xl border border-white/10 px-4 py-3 focus:border-blue-500 focus:outline-none" />
+              <input type="password" placeholder="Nueva contraseña (mín 6 car.)" value={newAdminPass} onChange={(e) => setNewAdminPass(e.target.value)} className="w-full text-xs bg-neutral-950 text-white rounded-xl border border-white/10 px-4 py-3 focus:border-blue-500 focus:outline-none" />
+              <button
+                disabled={isSavingCreds}
+                onClick={async () => {
+                  if (newAdminUser.trim().length < 3 || newAdminPass.length < 6) {
+                    showToast("Usuario mín 3 caracteres y contraseña mín 6.", "error");
+                    return;
+                  }
+                  setIsSavingCreds(true);
+                  try {
+                    await api.admin(sessionGet(), "changeCredentials", { newUsername: newAdminUser.trim(), newPassword: newAdminPass });
+                    setForceCredChange(false);
+                    showToast("Credenciales actualizadas. Volvé a iniciar sesión.", "success");
+                    doLocalLogout();
+                  } catch (err: unknown) {
+                    showToast(err instanceof Error ? err.message : "Error al cambiar credenciales.", "error");
+                  } finally {
+                    setIsSavingCreds(false);
+                  }
+                }}
+                className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-extrabold text-xs rounded-xl cursor-pointer"
+              >
+                {isSavingCreds ? "Guardando..." : "Guardar y volver a iniciar sesión"}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
       
       {/* Fondo y Blur desacoplados para evitar crear un "containing block" que rompa el centrado de los modales 'fixed' al hacer scroll */}
       <div className="fixed inset-0 bg-neutral-950/95 backdrop-blur-md pointer-events-none -z-10" />
@@ -1740,7 +1746,7 @@ export default function AdminPortal({
             </button>
           )}
           <div className="w-9 h-9 bg-blue-600 rounded-xl flex items-center justify-center shadow-lg shadow-blue-500/20 text-white font-black text-sm">
-            PC
+            Pa
           </div>
           <div>
             <h2 className="text-sm font-extrabold text-white">Panel de Administración</h2>
@@ -1768,9 +1774,9 @@ export default function AdminPortal({
 
       <div className={`flex-1 w-full mx-auto p-4 md:p-8 flex flex-col md:flex-row gap-6 ${isLoggedIn && isSidebarCollapsed ? "max-w-none" : "max-w-7xl"}`}>
         {isLoggedIn && isAtraso && (
-          <div className="w-full p-3.5 rounded-2xl bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs font-bold flex items-center gap-2">
+          <div className="w-full p-3.5 rounded-2xl bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs font-bold flex items-center gap-2 animate-pulse">
             <AlertTriangle className="w-4 h-4 shrink-0" />
-            <span>⚠️ Pago pendiente: regularizá tu cuenta con Magxor Engine para mantener la tienda activa.</span>
+            <span>Tu Cuenta Puede ser Pausada por Falta de Pago: regularizá tu cuenta con Magxor Engine para mantener la tienda activa.</span>
           </div>
         )}
 
@@ -1791,13 +1797,12 @@ export default function AdminPortal({
               <form onSubmit={handleLoginSubmit} className="space-y-4">
                 <div>
                   <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">
-                    Usuario
+                    Usuario (opcional si usás solo el ADMIN PASS)
                   </label>
                   <div className="relative">
                     <input
                       type="text"
-                      required
-                      placeholder="Ej: admin"
+                      placeholder="Ej: admin (vacío = solo ADMIN PASS)"
                       value={username}
                       onChange={(e) => setUsername(e.target.value)}
                       disabled={isLoggingIn}
@@ -1809,7 +1814,7 @@ export default function AdminPortal({
 
                 <div>
                   <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">
-                    Contraseña
+                    Contraseña o ADMIN PASS
                   </label>
                   <div className="relative">
                     <input
@@ -1872,6 +1877,7 @@ export default function AdminPortal({
             {/* Sidebar Controls */}
             {!isSidebarCollapsed && (
               <div className="w-full md:w-60 flex flex-col gap-2.5 shrink-0">
+                {!isUsuario && (
                 <button
                   onClick={() => setActiveTab("metrics")}
                   className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl text-xs font-bold transition-all text-left border cursor-pointer ${
@@ -1883,7 +1889,9 @@ export default function AdminPortal({
                   <LayoutDashboard className="w-4.5 h-4.5 shrink-0" />
                   <span>Panel de Control</span>
                 </button>
+                )}
 
+                {!isUsuario && (
                 <button
                   onClick={() => setActiveTab("inventory")}
                   className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl text-xs font-bold transition-all text-left border cursor-pointer ${
@@ -1895,6 +1903,7 @@ export default function AdminPortal({
                   <Package className="w-4.5 h-4.5 shrink-0" />
                   <span>Editar Inventario ({totalProductsCount})</span>
                 </button>
+                )}
 
                 <button
                   onClick={() => setActiveTab("clients")}
@@ -1925,6 +1934,7 @@ export default function AdminPortal({
                   )}
                 </button>
 
+                {!isUsuario && (
                 <button
                   onClick={() => setActiveTab("settings")}
                   className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl text-xs font-bold transition-all text-left border cursor-pointer ${
@@ -1936,6 +1946,35 @@ export default function AdminPortal({
                   <Settings className="w-4.5 h-4.5 shrink-0" />
                   <span>Datos de la Tienda</span>
                 </button>
+                )}
+
+                {!isUsuario && (
+                <button
+                  onClick={() => setActiveTab("users")}
+                  className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl text-xs font-bold transition-all text-left border cursor-pointer ${
+                    activeTab === "users"
+                      ? "bg-blue-600/10 border-blue-500/30 text-blue-400 shadow-md"
+                      : "bg-[#111111]/60 border-white/5 text-slate-400 hover:text-white hover:bg-white/5"
+                  }`}
+                >
+                  <Users className="w-4.5 h-4.5 shrink-0" />
+                  <span>Gestión de Usuarios</span>
+                </button>
+                )}
+
+                {!isUsuario && (
+                <button
+                  onClick={() => setActiveTab("configdb")}
+                  className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl text-xs font-bold transition-all text-left border cursor-pointer ${
+                    activeTab === "configdb"
+                      ? "bg-blue-600/10 border-blue-500/30 text-blue-400 shadow-md"
+                      : "bg-[#111111]/60 border-white/5 text-slate-400 hover:text-white hover:bg-white/5"
+                  }`}
+                >
+                  <Lock className="w-4.5 h-4.5 shrink-0" />
+                  <span>CONFIGURACION</span>
+                </button>
+                )}
 
                 <div className="pt-4 border-t border-white/5 mt-3 space-y-2">
                   <button
@@ -1988,12 +2027,12 @@ export default function AdminPortal({
                         </button>
                         <button
                           type="button"
-                          onClick={() => setBillingPeriod("30dias")}
+                          onClick={() => setBillingPeriod("siempre")}
                           className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all cursor-pointer ${
-                            billingPeriod === "30dias" ? "bg-blue-600/20 text-blue-400 border border-blue-500/20" : "text-slate-450 hover:text-white border border-transparent"
+                            billingPeriod === "siempre" ? "bg-blue-600/20 text-blue-400 border border-blue-500/20" : "text-slate-450 hover:text-white border border-transparent"
                           }`}
                         >
-                          30 Días
+                          Desde Siempre
                         </button>
                         <button
                           type="button"
@@ -2122,6 +2161,25 @@ export default function AdminPortal({
                         <div className="absolute top-4 right-4 text-emerald-500/10 group-hover:text-emerald-500/20 transition-colors font-mono text-xl font-black select-none">$</div>
                       </button>
                     </div>
+
+                    {/* Fila 2: última venta + vendido + cobrado */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                      <div className="bg-[#1c1c1c] border border-white/5 rounded-2xl p-4.5 min-h-[90px] shadow-md">
+                        <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block">Fecha Última Venta</span>
+                        <strong className="text-xl font-black text-white mt-1.5 block">{ultimaVenta.date ? formatearFechaES(ultimaVenta.raw) : "—"}</strong>
+                        <span className="text-[9px] text-slate-500">{ultimaVenta.date ? formatearHoraES(ultimaVenta.raw) + " hs" : "Sin ventas registradas"}</span>
+                      </div>
+                      <div className="bg-[#1c1c1c] border border-white/5 rounded-2xl p-4.5 min-h-[90px] shadow-md">
+                        <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block">Total Vendido</span>
+                        <strong className="text-xl font-black text-blue-400 mt-1.5 block">{formatPrice(totalVendido)}</strong>
+                        <span className="text-[9px] text-slate-500">Bruto del periodo ({billingSalesCount} ventas)</span>
+                      </div>
+                      <div className="bg-[#1c1c1c] border border-white/5 rounded-2xl p-4.5 min-h-[90px] shadow-md">
+                        <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block">Total Cobrado</span>
+                        <strong className="text-xl font-black text-emerald-400 mt-1.5 block">{formatPrice(totalCobrado)}</strong>
+                        <span className="text-[9px] text-slate-500">Entregados + confirmados</span>
+                      </div>
+                    </div>
                   </div>
 
                   <div>
@@ -2205,17 +2263,8 @@ export default function AdminPortal({
                     </div>
                   </div>
 
-                  <div className="p-4 bg-white/2.5 rounded-2xl border border-white/5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                    <div className="space-y-1">
-                      <span className="text-xs font-bold text-slate-350 block">Modo Offline e Instantáneo</span>
-                      <p className="text-[11px] text-slate-400 leading-relaxed">
-                        Cualquier cambio realizado en este panel se refleja <strong>al instante</strong> en el catálogo visible de la página.
-                      </p>
-                    </div>
-                  </div>
                 </div>
               )}
-
               {/* TAB 2: INVENTORY LIST TABLE */}
               {activeTab === "inventory" && (
                 <div className="space-y-4 flex-1 flex flex-col">
@@ -2676,11 +2725,23 @@ export default function AdminPortal({
 
                       <div>
                         <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">
+                          Slogan (debajo del NOMBRE WEB en navbar y footer)
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="Ej: Tu tienda de confianza"
+                          value={formData.slogan}
+                          onChange={(e) => setFormData({ ...formData, slogan: e.target.value })}
+                          className="w-full text-xs bg-[#151515] text-white rounded-xl border border-white/10 px-4 py-2.5 focus:border-blue-500 focus:outline-none"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">
                           Dirección Física (Local para Retiros)
                         </label>
                         <input
                           type="text"
-                          required
                           value={formData.direccion}
                           onChange={(e) => setFormData({ ...formData, direccion: e.target.value })}
                           className="w-full text-xs bg-[#151515] text-white rounded-xl border border-white/10 px-4 py-2.5 focus:border-blue-500 focus:outline-none"
@@ -2693,7 +2754,6 @@ export default function AdminPortal({
                         </label>
                         <input
                           type="text"
-                          required
                           value={formData.horarios}
                           onChange={(e) => setFormData({ ...formData, horarios: e.target.value })}
                           className="w-full text-xs bg-[#151515] text-white rounded-xl border border-white/10 px-4 py-2.5 focus:border-blue-500 focus:outline-none"
@@ -2721,7 +2781,6 @@ export default function AdminPortal({
                         </label>
                         <input
                           type="text"
-                          required
                           placeholder="Ej: 5493585706343"
                           value={formData.contactoMayorista}
                           onChange={(e) => setFormData({ ...formData, contactoMayorista: e.target.value })}
@@ -2735,7 +2794,6 @@ export default function AdminPortal({
                         </label>
                         <input
                           type="text"
-                          required
                           placeholder="Ej: 5493584164396"
                           value={formData.contactoTicket}
                           onChange={(e) => setFormData({ ...formData, contactoTicket: e.target.value })}
@@ -2776,196 +2834,151 @@ export default function AdminPortal({
                         </span>
                       </div>
                     </div>
-                      <div className="bg-[#111111] rounded-2xl border border-white/5 overflow-hidden">
+
+                      {/* Logo + Favicon (subida a imgbb, siempre WebP) */}
+                      <div className="bg-[#111111] rounded-2xl border border-white/5 p-5 space-y-4">
+                        <div className="flex items-center gap-3">
+                          <div className="p-2 rounded-xl bg-blue-500/10 text-blue-400">
+                            <Image className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <h4 className="text-xs font-bold text-white uppercase tracking-wider">Logo y Favicon (WebP automático)</h4>
+                            <p className="text-[10px] text-slate-400 mt-0.5">Se convierten a WebP antes de subirse a imgbb. Se usan en navbar y footer.</p>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Logo (navbar y footer)</label>
+                            <div className="flex items-center gap-2">
+                              {formData.logoUrl && <img src={formData.logoUrl} alt="Logo" className="w-10 h-10 rounded-lg object-cover border border-white/10" referrerPolicy="no-referrer" />}
+                              <label className="flex-1 px-4 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-xs text-slate-300 cursor-pointer text-center">
+                                {isUploadingLogo ? "Subiendo..." : "Subir logo"}
+                                <input type="file" accept="image/*" className="hidden" disabled={isUploadingLogo} onChange={async (e) => {
+                                  const f = e.target.files?.[0]; if (!f) return;
+                                  setIsUploadingLogo(true);
+                                  try { const url = await uploadMediaToImgbb(f, "logo"); setFormData((p) => ({ ...p, logoUrl: url })); showToast("Logo subido en WebP.", "success"); }
+                                  catch (err: unknown) { showToast(err instanceof Error ? err.message : "Error al subir logo.", "error"); }
+                                  finally { setIsUploadingLogo(false); e.target.value = ""; }
+                                }} />
+                              </label>
+                            </div>
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Favicon</label>
+                            <div className="flex items-center gap-2">
+                              {formData.faviconUrl && <img src={formData.faviconUrl} alt="Favicon" className="w-10 h-10 rounded-lg object-cover border border-white/10" referrerPolicy="no-referrer" />}
+                              <label className="flex-1 px-4 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-xs text-slate-300 cursor-pointer text-center">
+                                {isUploadingFavicon ? "Subiendo..." : "Subir favicon"}
+                                <input type="file" accept="image/*" className="hidden" disabled={isUploadingFavicon} onChange={async (e) => {
+                                  const f = e.target.files?.[0]; if (!f) return;
+                                  setIsUploadingFavicon(true);
+                                  try { const url = await uploadMediaToImgbb(f, "favicon"); setFormData((p) => ({ ...p, faviconUrl: url })); showToast("Favicon subido en WebP.", "success"); }
+                                  catch (err: unknown) { showToast(err instanceof Error ? err.message : "Error al subir favicon.", "error"); }
+                                  finally { setIsUploadingFavicon(false); e.target.value = ""; }
+                                }} />
+                              </label>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Portada splash móvil: imagen o video ≤10s, siempre WebP */}
+                      <div className="bg-[#111111] rounded-2xl border border-white/5 p-5 space-y-4">
+                        <div className="flex items-center gap-3">
+                          <div className="p-2 rounded-xl bg-purple-500/10 text-purple-400">
+                            <Smartphone className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <h4 className="text-xs font-bold text-white uppercase tracking-wider">Portada Splash (vista móvil)</h4>
+                            <p className="text-[10px] text-slate-400 mt-0.5">Video de hasta 10 segundos o imagen. Ambos se convierten a WebP.</p>
+                          </div>
+                        </div>
+                        {formData.logoAnimadoUrl && (
+                          <img src={formData.logoAnimadoUrl} alt="Portada" className="w-full max-h-48 object-cover rounded-xl border border-white/10" referrerPolicy="no-referrer" />
+                        )}
+                        <label className="block px-4 py-3 bg-white/5 hover:bg-white/10 border border-dashed border-white/15 rounded-xl text-xs text-slate-300 cursor-pointer text-center">
+                          {isUploadingSplash ? "Convirtiendo y subiendo a WebP..." : "Subir imagen o video (máx 10s)"}
+                          <input type="file" accept="image/*,video/mp4,video/webm,video/quicktime" className="hidden" disabled={isUploadingSplash} onChange={async (e) => {
+                            const f = e.target.files?.[0]; if (!f) return;
+                            setIsUploadingSplash(true);
+                            try { const url = await uploadMediaToImgbb(f, "splash"); setFormData((p) => ({ ...p, logoAnimadoUrl: url })); showToast("Portada subida en WebP.", "success"); }
+                            catch (err: unknown) { showToast(err instanceof Error ? err.message : "Error al subir portada.", "error"); }
+                            finally { setIsUploadingSplash(false); e.target.value = ""; }
+                          }} />
+                        </label>
+                      </div>
+
+                      {/* Cambio de Credenciales de Acceso */}
+                      <div className="bg-[#111111] rounded-2xl border border-white/5 p-5 space-y-4">
+                        <div className="flex items-center gap-3">
+                          <div className="p-2 rounded-xl bg-blue-500/10 text-blue-400">
+                            <Lock className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <h4 className="text-xs font-bold text-white uppercase tracking-wider">Credenciales de Acceso Admin</h4>
+                            <p className="text-[10px] text-slate-400 mt-0.5">Modificá tu usuario y contraseña (ejecuta action=changeCredentials). El usuario MAGXOR es rol Desarrollador y no figura aquí.</p>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">
+                              Nuevo Usuario
+                            </label>
+                            <input
+                              type="text"
+                              placeholder={adminUser || "admin"}
+                              value={credUsername}
+                              onChange={(e) => setCredUsername(e.target.value)}
+                              className="w-full text-xs bg-[#151515] text-white rounded-xl border border-white/10 px-4 py-2.5 focus:border-blue-500 focus:outline-none"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">
+                              Nueva Contraseña
+                            </label>
+                            <input
+                              type="password"
+                              placeholder="••••••••"
+                              value={credPassword}
+                              onChange={(e) => setCredPassword(e.target.value)}
+                              className="w-full text-xs bg-[#151515] text-white rounded-xl border border-white/10 px-4 py-2.5 focus:border-blue-500 focus:outline-none"
+                            />
+                          </div>
+                        </div>
+
                         <button
                           type="button"
-                          onClick={() => setIsDbCollapsibleOpen(!isDbCollapsibleOpen)}
-                          className="w-full flex items-center justify-between p-4 bg-[#111111] hover:bg-white/5 transition-all text-left cursor-pointer"
+                          disabled={isChangingCreds}
+                          onClick={async () => {
+                            if (!credUsername.trim() && !credPassword.trim()) {
+                              showToast("Ingresá un nuevo usuario o nueva contraseña.", "error");
+                              return;
+                            }
+                            setIsChangingCreds(true);
+                            try {
+                              if (!isEndpointConfigured()) {
+                                throw new Error("Endpoint Apps Script no configurado.");
+                              }
+                              await api.changeCredentials(sessionGet(), credUsername.trim() || adminUser, credPassword);
+                              if (credUsername.trim()) {
+                                setAdminUser(credUsername.trim());
+                                localStorage.setItem("mx_admin_user", credUsername.trim());
+                              }
+                              setCredPassword("");
+                              showToast("¡Credenciales actualizadas correctamente (action=changeCredentials)!", "success");
+                            } catch (err: any) {
+                              showToast(err.message || "Error al actualizar credenciales.", "error");
+                            } finally {
+                              setIsChangingCreds(false);
+                            }
+                          }}
+                          className="px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-white font-bold text-xs rounded-xl border border-white/10 transition-colors flex items-center gap-1.5 cursor-pointer"
                         >
-                          <div className="flex items-center gap-3">
-                            <div className={`p-2 rounded-xl ${isDbUnlocked ? "bg-emerald-500/10 text-emerald-450" : "bg-blue-500/10 text-blue-400"}`}>
-                              {isDbUnlocked ? <Check className="w-4 h-4" /> : <Lock className="w-4 h-4" />}
-                            </div>
-                            <div>
-                              <span className="text-xs font-black text-white uppercase tracking-wider block">
-                                Configuración de Base de Datos
-                              </span>
-                              <span className="text-[10px] text-slate-400 block mt-0.5 font-sans">
-                                {isDbUnlocked 
-                                  ? "✓ Sección desbloqueada — Podés editar las claves de Google Sheets" 
-                                  : "🔒 Sección protegida — Hacé clic para desplegar e ingresar la contraseña de Administrador"}
-                              </span>
-                            </div>
-                          </div>
-                          <div className="text-slate-400 font-mono text-xs select-none pr-2">
-                            {isDbCollapsibleOpen ? "OCULTAR ▴" : "VER ▾"}
-                          </div>
+                          {isChangingCreds ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Lock className="w-3.5 h-3.5" />}
+                          <span>Actualizar Credenciales (action=changeCredentials)</span>
                         </button>
-
-                        {isDbCollapsibleOpen && (
-                          <div className="p-4 border-t border-white/5 bg-[#141414] space-y-4">
-                            {!isDbUnlocked ? (
-                              /* ACCES CONTROL PASSWORD PROMPT */
-                              <div className="p-4 bg-red-500/5 border border-red-500/10 rounded-2xl space-y-3">
-                                <div className="space-y-1">
-                                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest font-sans">
-                                    Ingresá la clave de Administrador
-                                  </label>
-                                  <p className="text-[10px] text-slate-500 font-sans">
-                                    Para preservar la integridad del sistema, la configuración está protegida para evitar modificaciones accidentales.
-                                  </p>
-                                </div>
-                                <div className="flex flex-col sm:flex-row gap-2">
-                                  <input
-                                    type="password"
-                                    placeholder="••••••••"
-                                    value={unlockPasswordAttempt}
-                                    onChange={(e) => setUnlockPasswordAttempt(e.target.value)}
-                                    onKeyDown={(e) => {
-                                      if (e.key === "Enter") {
-                                        e.preventDefault();
-                                        void handleUnlockDb();
-                                      }
-                                    }}
-                                    className="flex-1 text-xs bg-[#111] text-white rounded-xl border border-white/10 px-4 py-2.5 focus:border-blue-500 focus:outline-none placeholder-slate-705"
-                                  />
-                                  <button
-                                    type="button"
-                                    disabled={isUnlocking}
-                                    onClick={() => {
-                                      void handleUnlockDb();
-                                    }}
-                                    className="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 transition-colors text-white text-xs font-bold rounded-xl cursor-pointer"
-                                  >
-                                    Desbloquear
-                                  </button>
-                                </div>
-                              </div>
-                            ) : (
-                              /* FULL EDITABLE DATABASE SINK URLS */
-                              <div className="space-y-4">
-                                <div className="bg-emerald-500/5 border border-emerald-500/10 p-3 rounded-xl flex items-center justify-between">
-                                  <div className="flex items-center gap-2">
-                                    <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse shrink-0"></span>
-                                    <span className="text-[10px] text-emerald-450 font-bold font-sans">Modo de Edición Desbloqueado</span>
-                                  </div>
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setIsDbUnlocked(false);
-                                      setUnlockPasswordAttempt("");
-                                      showToast("Sección bloqueada correctamente.", "info");
-                                    }}
-                                    className="text-[9px] hover:underline text-slate-400 hover:text-white"
-                                  >
-                                    Bloquear sección de nuevo
-                                  </button>
-                                </div>
-
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                  <div>
-                                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 font-mono">
-                                      Planilla de Google Sheets (URL)
-                                    </label>
-                                    <input
-                                      type="text"
-                                      required
-                                      placeholder="https://docs.google.com/spreadsheets/d/..."
-                                      value={localSheetsUrl}
-                                      onChange={(e) => setLocalSheetsUrl(e.target.value)}
-                                      className="w-full text-xs bg-[#111111] text-white rounded-xl border border-white/10 px-4 py-2.5 focus:border-blue-500 focus:outline-none font-mono"
-                                    />
-                                    <span className="text-[9px] text-slate-500 mt-1 block leading-relaxed font-sans">
-                                      Aseguráte de que esté publicada en la Web (Archivo - Compartir - Publicar en la Web) como valores separados por comas (CSV).
-                                    </span>
-                                  </div>
-
-                                  <div>
-                                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 font-mono">
-                                      Google Apps Script API (URL de Endpoint)
-                                    </label>
-                                    <input
-                                      type="text"
-                                      required
-                                      placeholder="https://script.google.com/macros/s/.../exec"
-                                      value={localBackendUrl}
-                                      onChange={(e) => setLocalBackendUrl(e.target.value)}
-                                      className="w-full text-xs bg-[#111111] text-white rounded-xl border border-white/10 px-4 py-2.5 focus:border-blue-500 focus:outline-none font-mono"
-                                    />
-                                    <span className="text-[9px] text-slate-500 mt-1 block leading-relaxed font-sans">
-                                      Web App macro desplegada para poder escribir, eliminar, crear y leer datos.
-                                    </span>
-                                  </div>
-                                </div>
-
-                                <div className="p-3.5 bg-blue-500/5 border border-blue-500/10 rounded-xl space-y-2">
-                                  <span className="text-[10px] font-bold text-blue-400 block font-sans">⚠️ Nota Crucial de Despliegue en Apps Script:</span>
-                                  <p className="text-[10px] text-slate-350 leading-relaxed font-sans">
-                                    Para que funcione tu edición, creación y eliminación, el script en el Google Sheets debe tener permisos globales de ejecución sin autenticación. Aseguráte de implementar con:
-                                  </p>
-                                  <ul className="list-disc pl-4 text-[9px] text-slate-400 space-y-0.5 font-sans">
-                                    <li><strong>Ejecutar como (Execute as):</strong> "Yo" (Tu correo electrónico / imperiomagxor@gmail.com)</li>
-                                    <li><strong>Quién tiene acceso (Who has access):</strong> "Cualquier persona" (Anyone o Anyone, even anonymous)</li>
-                                  </ul>
-                                </div>
-
-                                {/* Copiar Código Completo para Google Apps Script */}
-                                <div className="p-4 bg-[#111111] border border-white/10 rounded-xl space-y-3">
-                                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
-                                    <div>
-                                      <span className="text-xs font-bold text-white block">Código Apps Script Completo</span>
-                                      <span className="text-[10px] text-slate-400 mt-0.5 block">Copia y pega este código en la sección de "Extensiones &gt; Apps Script" de tu planilla de Google.</span>
-                                    </div>
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        navigator.clipboard.writeText(APPS_SCRIPT_TEMPLATE);
-                                        setScriptCopied(true);
-                                        showToast("¡Código copiado al portapapeles con éxito!", "success");
-                                        setTimeout(() => setScriptCopied(false), 2000);
-                                      }}
-                                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer shrink-0 ${
-                                        scriptCopied 
-                                          ? "bg-emerald-600 border border-emerald-500 text-white" 
-                                          : "bg-blue-600 hover:bg-blue-500 text-white border border-blue-500/20"
-                                      }`}
-                                    >
-                                      {scriptCopied ? (
-                                        <>
-                                          <Check className="w-3.5 h-3.5" />
-                                          <span>¡Copiado!</span>
-                                        </>
-                                      ) : (
-                                        <>
-                                          <span>📋 Copiar Código</span>
-                                        </>
-                                      )}
-                                    </button>
-                                  </div>
-
-                                  <div className="relative">
-                                    <pre className="text-[10px] text-slate-350 bg-[#0a0a0a] border border-white/5 rounded-lg p-3 max-h-48 overflow-y-auto font-mono select-all leading-normal">
-                                      {APPS_SCRIPT_TEMPLATE}
-                                    </pre>
-                                  </div>
-                                </div>
-
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setLocalSheetsUrl("");
-                                    const envUrl = (import.meta as unknown as { env: Record<string, string> }).env.VITE_APPS_SCRIPT_URL || "";
-                                    setLocalBackendUrl(envUrl);
-                                    showToast("Configuración restablecida al demo predeterminado.", "info");
-                                  }}
-                                  className="px-3.5 py-1.5 bg-white/5 hover:bg-white/10 transition-colors text-slate-350 hover:text-white font-bold text-[10px] rounded-lg cursor-pointer"
-                                >
-                                  Restablecer URLs de Prueba Predeterminadas
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        )}
                       </div>
 
                     <div className="pt-4 border-t border-white/5 flex gap-3">
@@ -2989,714 +3002,178 @@ export default function AdminPortal({
                 </div>
               )}
 
-              {/* TAB 4: CLIENTS LIST */}
-              {activeTab === "clients" && (
-                <div className="space-y-6 flex-1 flex flex-col">
-                  {/* Header Row */}
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                    <div>
-                      <h3 className="text-base font-extrabold text-white flex items-center gap-2">
-                        <Users className="w-5 h-5 text-blue-400" />
-                        <span>Clientes Registrados</span>
-                      </h3>
-                      <p className="text-[11px] text-slate-400 mt-0.5">
-                        Contactos registrados en tu base de datos.
-                      </p>
-                    </div>
-                    <button
-                      onClick={fetchClients}
-                      disabled={isLoadingClients}
-                      className="px-3.5 py-2 self-start sm:self-center bg-white/5 hover:bg-white/10 active:scale-95 text-slate-300 font-bold text-xs rounded-xl hover:text-white transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-                    >
-                      <RefreshCw className={`w-3.5 h-3.5 ${isLoadingClients ? "animate-spin text-blue-400" : ""}`} />
-                      <span>Actualizar Lista</span>
-                    </button>
-                  </div>
-
-                  {/* Statistics Widgets */}
-                  {!isLoadingClients && clients.length > 0 && (
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
-                      <div className="bg-[#111111]/40 border border-white/5 p-4 rounded-2xl flex items-center gap-3.5">
-                        <div className="w-10 h-10 rounded-xl bg-blue-500/10 flex items-center justify-center text-blue-400 shrink-0">
-                          <Users className="w-5 h-5" />
-                        </div>
-                        <div>
-                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Registrados Totales</span>
-                          <span className="text-lg font-black text-white block mt-0.5">{clients.length}</span>
-                        </div>
-                      </div>
-
-                      <div className="bg-[#111111]/40 border border-white/5 p-4 rounded-2xl flex items-center gap-3.5">
-                        <div className="w-10 h-10 rounded-xl bg-amber-500/10 flex items-center justify-center text-amber-400 shrink-0">
-                          <Phone className="w-5 h-5" />
-                        </div>
-                        <div>
-                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Pendientes de Contacto</span>
-                          <span className="text-lg font-black text-amber-400 block mt-0.5">{clients.filter(c => c.contacto === "NO").length}</span>
-                        </div>
-                      </div>
-
-                      <div className="bg-[#111111]/40 border border-white/5 p-4 rounded-2xl flex items-center gap-3.5">
-                        <div className="w-10 h-10 rounded-xl bg-emerald-500/10 flex items-center justify-center text-emerald-400 shrink-0">
-                          <MessageSquare className="w-5 h-5" />
-                        </div>
-                        <div>
-                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Contactados</span>
-                          <span className="text-lg font-black text-emerald-400 block mt-0.5">{clients.filter(c => c.contacto === "SI").length}</span>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Search and Filters panel */}
-                  {!isLoadingClients && clients.length > 0 && (
-                    <div className="flex flex-col md:flex-row gap-3 items-center justify-between p-3.5 bg-[#111111]/60 border border-white/5 rounded-2xl">
-                      {/* Search bar */}
-                      <div className="relative w-full md:max-w-xs">
-                        <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                        <input
-                          type="text"
-                          placeholder="Buscar por número o fecha..."
-                          value={clientSearchTerm}
-                          onChange={(e) => setClientSearchTerm(e.target.value)}
-                          className="w-full bg-[#151515] border border-white/5 text-white placeholder-slate-500 text-xs rounded-xl pl-9 pr-4 py-2.5 focus:border-blue-500 focus:outline-none transition-colors"
-                        />
-                        {clientSearchTerm && (
-                          <button
-                            onClick={() => setClientSearchTerm("")}
-                            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white text-xs cursor-pointer"
-                          >
-                            ×
-                          </button>
-                        )}
-                      </div>
-
-                      {/* Filters tabs */}
-                      <div className="flex items-center gap-1.5 self-stretch md:self-auto overflow-x-auto pb-1 md:pb-0">
-                        <button
-                          onClick={() => setClientFilterStatus("all")}
-                          className={`px-3 py-1.5 text-xs font-bold rounded-xl border transition-all cursor-pointer shrink-0 ${
-                            clientFilterStatus === "all"
-                              ? "bg-blue-600/10 border-blue-500/20 text-blue-400"
-                              : "bg-[#151515] hover:bg-white/5 border-white/5 text-slate-400"
-                          }`}
-                        >
-                          Todos ({clients.length})
-                        </button>
-                        <button
-                          onClick={() => setClientFilterStatus("pending")}
-                          className={`px-3 py-1.5 text-xs font-bold rounded-xl border transition-all cursor-pointer shrink-0 ${
-                            clientFilterStatus === "pending"
-                              ? "bg-amber-500/10 border-amber-500/20 text-amber-400"
-                              : "bg-[#151515] hover:bg-white/5 border-white/5 text-slate-400"
-                          }`}
-                        >
-                          Pendientes ({clients.filter(c => c.contacto === "NO").length})
-                        </button>
-                        <button
-                          onClick={() => setClientFilterStatus("contacted")}
-                          className={`px-3 py-1.5 text-xs font-bold rounded-xl border transition-all cursor-pointer shrink-0 ${
-                            clientFilterStatus === "contacted"
-                              ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400"
-                              : "bg-[#151515] hover:bg-white/5 border-white/5 text-slate-400"
-                          }`}
-                        >
-                          Contactados ({clients.filter(c => c.contacto === "SI").length})
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {isLoadingClients ? (
-                    <div className="flex-grow flex flex-col items-center justify-center py-20 text-slate-500 text-xs">
-                      <RefreshCw className="w-8 h-8 animate-spin text-blue-500 mb-3" />
-                      Cargando lista de clientes registrados...
-                    </div>
-                  ) : clients.length === 0 ? (
-                    <div className="flex-grow bg-white/[0.02] border border-white/5 rounded-2xl p-12 flex flex-col items-center justify-center text-center">
-                      <div className="w-12 h-12 bg-white/5 rounded-2xl flex items-center justify-center text-slate-400 mb-4">
-                        <Smartphone className="w-6 h-6" />
-                      </div>
-                      <p className="text-xs text-slate-400 font-bold">No se encontraron clientes registrados.</p>
-                      <p className="text-[10px] text-slate-505 mt-1 max-w-sm">
-                        Los números de teléfono de contacto se guardarán aquí automáticamente cuando los clientes se unan al WhatsApp Club de tu tienda.
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="flex-1 overflow-x-auto max-h-[440px] bg-neutral-950/40 rounded-2xl border border-white/5">
-                      <table className="w-full text-left border-collapse text-xs">
-                        <thead>
-                          <tr className="border-b border-white/5 text-[9px] font-bold text-slate-400 uppercase tracking-wider bg-[#111111]/60">
-                            <th className="p-3.5 px-4 font-mono w-12 text-center">#</th>
-                            <th className="p-3.5">Número / WhatsApp</th>
-                            <th className="p-3.5 w-36">Fecha Registro</th>
-                            <th className="p-3.5 w-36">Método de Captura</th>
-                            <th className="p-3.5 w-24 text-center">Contactado</th>
-                            <th className="p-3.5 w-52 text-center">Acciones de Gestión</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-white/5">
-                          {clients.filter(c => {
-                            const term = clientSearchTerm.trim().toLowerCase();
-                            const matchesSearch = !term || 
-                              c.phone.toLowerCase().includes(term) || 
-                              (c.date && c.date.toLowerCase().includes(term)) ||
-                              (c.metodo && c.metodo.toLowerCase().includes(term));
-                            
-                            if (!matchesSearch) return false;
-                            
-                            if (clientFilterStatus === "contacted") return c.contacto === "SI";
-                            if (clientFilterStatus === "pending") return c.contacto === "NO";
-                            return true;
-                          }).length === 0 ? (
-                            <tr>
-                              <td colSpan={6} className="p-10 text-center text-slate-500 text-xs">
-                                Ningún cliente coincide con los criterios de búsqueda o filtros.
-                              </td>
-                            </tr>
-                          ) : (
-                            clients.filter(c => {
-                              const term = clientSearchTerm.trim().toLowerCase();
-                              const matchesSearch = !term || 
-                                c.phone.toLowerCase().includes(term) || 
-                                (c.date && c.date.toLowerCase().includes(term)) ||
-                                (c.metodo && c.metodo.toLowerCase().includes(term));
-                              
-                              if (!matchesSearch) return false;
-                              
-                              if (clientFilterStatus === "contacted") return c.contacto === "SI";
-                              if (clientFilterStatus === "pending") return c.contacto === "NO";
-                              return true;
-                            }).map((c, index) => {
-                              const cleanPhone = c.phone.replace(/[^0-9]/g, "");
-                              return (
-                                <tr key={index} className="hover:bg-white/[0.01] transition-colors">
-                                  {/* # Index number */}
-                                  <td className="p-3 px-4 font-mono text-[10px] text-slate-500 text-center">{index + 1}</td>
-                                  
-                                  {/* Phone number */}
-                                  <td className="p-3 font-semibold text-white font-mono">
-                                    <div className="flex items-center gap-1.5">
-                                      <Smartphone className="w-3.5 h-3.5 text-slate-505 shrink-0" />
-                                      <span>{c.phone}</span>
-                                    </div>
-                                  </td>
-                                  
-                                  {/* Registration Date */}
-                                  <td className="p-3 text-slate-400 font-mono text-[11px]">
-                                    <div className="flex items-center gap-1.5">
-                                      <Calendar className="w-3.5 h-3.5 text-slate-500 shrink-0" />
-                                      <span>{c.date || "N/A"}</span>
-                                    </div>
-                                  </td>
-                                  
-                                  {/* Capture Method */}
-                                  <td className="p-3">
-                                    <span className="inline-flex items-center px-2 py-0.5 bg-white/5 border border-white/5 rounded-full text-[9px] font-medium text-slate-400">
-                                      {c.metodo || "Club WhatsApp"}
-                                    </span>
-                                  </td>
-                                  
-                                  {/* Contact Status Badge Toggle */}
-                                  <td className="p-3 text-center">
-                                    <button
-                                      type="button"
-                                      onClick={() => handleToggleClientContact(c.phone, c.contacto)}
-                                      className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[9px] font-bold border cursor-pointer select-none transition-all active:scale-95 ${
-                                        c.contacto === "SI"
-                                          ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400"
-                                          : "bg-amber-500/10 border-amber-500/20 text-amber-400"
-                                      }`}
-                                      title="Haz clic para alternar de forma rápida"
-                                    >
-                                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${c.contacto === "SI" ? "bg-emerald-400 animate-pulse" : "bg-amber-400"}`}></span>
-                                      <span>{c.contacto}</span>
-                                    </button>
-                                  </td>
-                                  
-                                  {/* Actions */}
-                                  <td className="p-3">
-                                    <div className="flex items-center justify-center gap-2">
-                                      {/* Chatear / Volver a contactar Button */}
-                                      <a
-                                        href={`https://wa.me/${cleanPhone}`}
-                                        target="_blank"
-                                        referrerPolicy="no-referrer"
-                                        onClick={() => {
-                                          if (c.contacto === "NO") {
-                                            // Automatically switch status to "SI" upon clicking "Chatear"
-                                            handleToggleClientContact(c.phone, "NO");
-                                          }
-                                        }}
-                                        className={`inline-flex items-center gap-1 px-2.5 py-1 text-[10px] font-black rounded-lg transition-all cursor-pointer ${
-                                          c.contacto === "SI"
-                                            ? "bg-blue-600/10 hover:bg-blue-600/20 text-blue-400 border border-blue-500/10"
-                                            : "bg-emerald-500 hover:bg-emerald-400 text-neutral-950 shadow-md shadow-emerald-500/20"
-                                        }`}
-                                      >
-                                        <MessageSquare className="w-3 h-3 shrink-0" />
-                                        <span>{c.contacto === "SI" ? "Volver a contactar" : "Chatear"}</span>
-                                        <ExternalLink className="w-2.5 h-2.5 shrink-0" />
-                                      </a>
-
-                                      {/* Inline Deletion Confirmation Button */}
-                                      {clientToDeletePhone === c.phone ? (
-                                        <div className="flex items-center gap-1.5 bg-red-500/10 border border-red-500/20 rounded-lg p-0.5 px-1.5">
-                                          <span className="text-[9px] text-red-400 font-bold">¿Borrar?</span>
-                                          <button
-                                            type="button"
-                                            onClick={() => handleDeleteClient(c.phone)}
-                                            className="text-[9px] uppercase font-mono font-black text-red-400 hover:text-red-300 transition-colors cursor-pointer"
-                                          >
-                                            SÍ
-                                          </button>
-                                          <span className="text-slate-600">/</span>
-                                          <button
-                                            type="button"
-                                            onClick={() => setClientToDeletePhone(null)}
-                                            className="text-[9px] uppercase font-mono font-black text-slate-400 hover:text-white transition-colors cursor-pointer"
-                                          >
-                                            NO
-                                          </button>
-                                        </div>
-                                      ) : (
-                                        <button
-                                          type="button"
-                                          onClick={() => setClientToDeletePhone(c.phone)}
-                                          className="p-1 px-1.5 bg-white/5 hover:bg-red-500/10 text-slate-500 hover:text-red-400 border border-white/5 hover:border-red-500/20 rounded-lg transition-all cursor-pointer"
-                                          title="Eliminar este cliente permanentemente"
-                                        >
-                                          <Trash2 className="w-3 h-3" />
-                                        </button>
-                                      )}
-                                    </div>
-                                  </td>
-                                </tr>
-                              );
-                            })
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
+              {/* TAB: GESTIÓN DE USUARIOS */}
+              {activeTab === "users" && (
+                <UserManagement
+                  session={sessionGet()}
+                  adminPass={adminPass}
+                  onAdminPassVerified={(pass) => setAdminPass(pass)}
+                  showToast={showToast}
+                />
               )}
 
-              {/* TAB 5: ORDERS LIST */}
-              {activeTab === "orders" && (
-                <div className="space-y-6 flex-1 flex flex-col font-sans">
-                  {/* Header Row */}
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                    <div>
-                      <h3 className="text-base font-extrabold text-white flex items-center gap-2">
-                        <Receipt className="w-5 h-5 text-blue-400" />
-                        <span>Gestión de Pedidos</span>
-                      </h3>
-                      <p className="text-[11px] text-slate-400 mt-0.5">
-                        Administrá las solicitudes generadas por tu checkout.
-                      </p>
-                    </div>
-                    <button
-                      onClick={fetchOrders}
-                      disabled={isLoadingOrders}
-                      className="px-3.5 py-2 self-start sm:self-center bg-white/5 hover:bg-white/10 active:scale-95 text-slate-300 font-bold text-xs rounded-xl hover:text-white transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-                    >
-                      <RefreshCw className={`w-3.5 h-3.5 ${isLoadingOrders ? "animate-spin text-blue-400" : ""}`} />
-                      <span>Actualizar Pedidos</span>
-                    </button>
+              {/* TAB: CONFIGURACION (Database Configuration) */}
+              {activeTab === "configdb" && (
+                <div className="space-y-6">
+                  <div>
+                    <h3 className="text-base font-extrabold text-white flex items-center gap-2">
+                      <Lock className="w-5 h-5 text-blue-400" />
+                      <span>CONFIGURACION — Base de Datos y Credenciales de Servidor</span>
+                    </h3>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      Sección protegida con contraseña de Administrador para configurar la conexión a Google Sheets y Apps Script.
+                    </p>
                   </div>
 
-                  {/* Statistics Widgets */}
-                  {!isLoadingOrders && orders.length > 0 && (
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
-                      <div className="bg-[#111111]/40 border border-white/5 p-4 rounded-2xl flex items-center gap-3.5">
-                        <div className="w-10 h-10 rounded-xl bg-blue-500/10 flex items-center justify-center text-blue-400 shrink-0">
-                          <Receipt className="w-5 h-5" />
-                        </div>
-                        <div>
-                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Pedidos Totales</span>
-                          <span className="text-lg font-black text-white block mt-0.5">{orders.length}</span>
-                        </div>
+                  {!isDbUnlocked ? (
+                    <div className="p-6 bg-neutral-900 border border-white/10 rounded-2xl space-y-4 max-w-xl">
+                      <div className="space-y-1">
+                        <label className="block text-xs font-bold text-white uppercase tracking-widest font-sans">
+                          Ingresá la clave de Administrador para desbloquear CONFIGURACION
+                        </label>
+                        <p className="text-[11px] text-slate-400 font-sans">
+                          Esta sección contiene credenciales críticas de la base de datos.
+                        </p>
                       </div>
-
-                      <div className="bg-[#111111]/40 border border-white/5 p-4 rounded-2xl flex items-center gap-3.5">
-                        <div className="w-10 h-10 rounded-xl bg-amber-500/10 flex items-center justify-center text-amber-400 shrink-0">
-                          <AlertTriangle className="w-5 h-5" />
-                        </div>
-                        <div>
-                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Pendientes</span>
-                          <span className="text-lg font-black text-amber-400 block mt-0.5">
-                            {orders.filter(o => o.estado === "PENDIENTE").length}
-                          </span>
-                        </div>
-                      </div>
-
-                      <div className="bg-[#111111]/40 border border-white/5 p-4 rounded-2xl flex items-center gap-3.5">
-                        <div className="w-10 h-10 rounded-xl bg-emerald-500/10 flex items-center justify-center text-emerald-400 shrink-0">
-                          <span className="text-emerald-400 font-extrabold text-sm font-mono">$</span>
-                        </div>
-                        <div>
-                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Facturado (Confirmados/Entregados)</span>
-                          <span className="text-lg font-black text-emerald-400 block mt-0.5">
-                            {formatPrice(orders.filter(o => o.estado === "CONFIRMADO" || o.estado === "ENTREGADO").reduce((sum, o) => sum + o.total, 0))}
-                          </span>
-                        </div>
+                      <div className="flex flex-col sm:flex-row gap-3">
+                        <input
+                          type="password"
+                          placeholder="••••••••"
+                          value={unlockPasswordAttempt}
+                          onChange={(e) => setUnlockPasswordAttempt(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              void handleUnlockDb();
+                            }
+                          }}
+                          className="flex-1 text-xs bg-[#111] text-white rounded-xl border border-white/10 px-4 py-3 focus:border-blue-500 focus:outline-none"
+                        />
+                        <button
+                          type="button"
+                          disabled={isUnlocking}
+                          onClick={() => void handleUnlockDb()}
+                          className="px-6 py-3 bg-blue-600 hover:bg-blue-500 transition-colors text-white text-xs font-bold rounded-xl cursor-pointer shadow-md"
+                        >
+                          {isUnlocking ? "Verificando..." : "Desbloquear Configuración"}
+                        </button>
                       </div>
                     </div>
-                  )}
-
-                  {/* Search and Filters panel */}
-                  {!isLoadingOrders && orders.length > 0 && (
-                    <div className="flex flex-col xl:flex-row gap-4 xl:items-center justify-between p-3.5 bg-[#111111]/60 border border-white/5 rounded-2xl">
-                      {/* Search bar & Filter toggler */}
-                      <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center flex-1 max-w-xl">
-                        <div className="relative flex-1">
-                          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                          <input
-                            type="text"
-                            placeholder="Buscar por ID, nombre o celular..."
-                            value={orderSearchTerm}
-                            onChange={(e) => setOrderSearchTerm(e.target.value)}
-                            className="w-full bg-[#151515] border border-white/5 text-white placeholder-slate-500 text-xs rounded-xl pl-9 pr-4 py-2.5 focus:border-blue-500 focus:outline-none transition-colors"
-                          />
-                          {orderSearchTerm && (
-                            <button
-                              onClick={() => setOrderSearchTerm("")}
-                              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white text-xs cursor-pointer"
-                            >
-                              ×
-                            </button>
-                          )}
+                  ) : (
+                    <div className="space-y-5">
+                      <div className="bg-emerald-500/10 border border-emerald-500/20 p-4 rounded-xl flex items-center justify-between">
+                        <div className="flex items-center gap-2.5">
+                          <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse shrink-0"></span>
+                          <span className="text-xs text-emerald-400 font-bold">Modo de Edición de Base de Datos Desbloqueado</span>
                         </div>
                         <button
                           type="button"
-                          onClick={() => setShowOrderFilters(!showOrderFilters)}
-                          className={`px-4 py-2.5 text-xs font-bold rounded-xl border transition-all cursor-pointer flex items-center justify-center gap-2 select-none ${
-                            showOrderFilters 
-                              ? "bg-blue-600/10 border-blue-500/30 text-blue-400" 
-                              : "bg-[#151515] border-white/5 text-slate-400 hover:text-white hover:border-white/10"
-                          }`}
+                          onClick={() => {
+                            setIsDbUnlocked(false);
+                            setUnlockPasswordAttempt("");
+                            showToast("Sección bloqueada correctamente.", "info");
+                          }}
+                          className="text-xs hover:underline text-slate-400 hover:text-white cursor-pointer font-semibold"
                         >
-                          <Filter className="w-3.5 h-3.5" />
-                          <span>{showOrderFilters ? "Ocultar Filtros" : "Filtrar por Estado"}</span>
+                          Bloquear sección
                         </button>
                       </div>
 
-                      {/* Filters tabs (Show/Hide conditionally) */}
-                      {showOrderFilters && (
-                        <div className="flex items-center gap-1.5 self-stretch xl:self-auto overflow-x-auto pb-1 xl:pb-0 animate-scale-in">
+                      <div className="bg-[#111111] p-5 rounded-2xl border border-white/5 space-y-4">
+                        <div>
+                          <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 font-mono">
+                            Google Apps Script API (URL de Endpoint)
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            placeholder="https://script.google.com/macros/s/.../exec"
+                            value={localBackendUrl}
+                            onChange={(e) => setLocalBackendUrl(e.target.value)}
+                            className="w-full text-xs bg-[#151515] text-white rounded-xl border border-white/10 px-4 py-2.5 focus:border-blue-500 focus:outline-none font-mono"
+                          />
+                          <span className="text-[9px] text-slate-500 mt-1 block">
+                            Web App macro desplegada para poder escribir, eliminar, crear y leer datos.
+                          </span>
+                        </div>
+
+                        <div className="flex gap-3 pt-3">
                           <button
-                            onClick={() => setOrderFilterStatus("all")}
-                            className={`px-3 py-1.5 text-xs font-bold rounded-xl border transition-all cursor-pointer shrink-0 ${
-                              orderFilterStatus === "all"
-                                ? "bg-blue-600/10 border-blue-500/20 text-blue-400"
-                                : "bg-[#151515] hover:bg-white/5 border-white/5 text-slate-400"
-                            }`}
+                            type="button"
+                            onClick={() => {
+                              if (onUpdateConnection) {
+                                onUpdateConnection(localSheetsUrl, localBackendUrl);
+                              }
+                              showToast("¡Configuración de base de datos guardada exitosamente!", "success");
+                            }}
+                            className="px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white font-extrabold text-xs rounded-xl shadow-md transition-colors cursor-pointer flex items-center gap-1.5"
                           >
-                            Activos ({orders.filter(o => o.estado !== "ARCHIVADO").length})
-                          </button>
-                          <button
-                            onClick={() => setOrderFilterStatus("PENDIENTE")}
-                            className={`px-3 py-1.5 text-xs font-bold rounded-xl border transition-all cursor-pointer shrink-0 ${
-                              orderFilterStatus === "PENDIENTE"
-                                ? "bg-amber-500/10 border-amber-500/20 text-amber-400"
-                                : "bg-[#151515] hover:bg-white/5 border-white/5 text-slate-400"
-                            }`}
-                          >
-                            Pendientes ({orders.filter(o => o.estado === "PENDIENTE").length})
-                          </button>
-                          <button
-                            onClick={() => setOrderFilterStatus("CONFIRMADO")}
-                            className={`px-3 py-1.5 text-xs font-bold rounded-xl border transition-all cursor-pointer shrink-0 ${
-                              orderFilterStatus === "CONFIRMADO"
-                                ? "bg-blue-500/10 border-blue-500/20 text-blue-400"
-                                : "bg-[#151515] hover:bg-white/5 border-white/5 text-slate-400"
-                            }`}
-                          >
-                            Confirmados ({orders.filter(o => o.estado === "CONFIRMADO").length})
-                          </button>
-                          <button
-                            onClick={() => setOrderFilterStatus("ENTREGADO")}
-                            className={`px-3 py-1.5 text-xs font-bold rounded-xl border transition-all cursor-pointer shrink-0 ${
-                              orderFilterStatus === "ENTREGADO"
-                                ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400"
-                                : "bg-[#151515] hover:bg-white/5 border-white/5 text-slate-400"
-                            }`}
-                          >
-                            Entregados ({orders.filter(o => o.estado === "ENTREGADO").length})
-                          </button>
-                          <button
-                            onClick={() => setOrderFilterStatus("CANCELADO")}
-                            className={`px-3 py-1.5 text-xs font-bold rounded-xl border transition-all cursor-pointer shrink-0 ${
-                              orderFilterStatus === "CANCELADO"
-                                ? "bg-red-500/10 border-red-500/20 text-red-400"
-                                : "bg-[#151515] hover:bg-white/5 border-white/5 text-slate-400"
-                            }`}
-                          >
-                            Cancelados ({orders.filter(o => o.estado === "CANCELADO").length})
-                          </button>
-                          <button
-                            onClick={() => setOrderFilterStatus("ARCHIVADO")}
-                            className={`px-3 py-1.5 text-xs font-bold rounded-xl border transition-all cursor-pointer shrink-0 ${
-                              orderFilterStatus === "ARCHIVADO"
-                                ? "bg-purple-500/10 border-purple-500/20 text-purple-400"
-                                : "bg-[#151515] hover:bg-white/5 border-white/5 text-slate-400"
-                            }`}
-                          >
-                            Archivados ({orders.filter(o => o.estado === "ARCHIVADO").length})
+                            <Check className="w-4 h-4" /> Guardar Configuración de Base de Datos
                           </button>
                         </div>
-                      )}
-                    </div>
-                  )}
-
-                  {isLoadingOrders ? (
-                    <div className="flex-grow flex flex-col items-center justify-center py-20 text-slate-500 text-xs">
-                      <RefreshCw className="w-8 h-8 animate-spin text-blue-500 mb-3" />
-                      Cargando lista de pedidos registrados...
-                    </div>
-                  ) : orders.length === 0 ? (
-                    <div className="flex-grow bg-white/[0.02] border border-white/5 rounded-2xl p-12 flex flex-col items-center justify-center text-center">
-                      <div className="w-12 h-12 bg-white/5 rounded-2xl flex items-center justify-center text-slate-400 mb-4">
-                        <Receipt className="w-6 h-6" />
                       </div>
-                      <p className="text-xs text-slate-400 font-bold">No se encontraron pedidos en la base de datos.</p>
-                      <p className="text-[10px] text-slate-500 mt-1 max-w-sm">
-                        Cuando un cliente complete el carrito de compras e inicie el checkout, sus pedidos se loguearán automáticamente aquí.
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="flex-1 overflow-x-auto max-h-[500px] bg-neutral-950/40 rounded-2xl border border-white/5">
-                      <table className="w-full text-left border-collapse text-xs">
-                        <thead>
-                          <tr className="border-b border-white/5 text-[9px] font-bold text-slate-400 uppercase tracking-wider bg-[#111111]/60">
-                            <th className="p-3.5 w-24">ID Pedido</th>
-                            <th className="p-3.5 w-32">Fecha / Hora</th>
-                            <th className="p-3.5 w-40">Cliente</th>
-                            <th className="p-3.5">Detalle Artículos</th>
-                            <th className="p-3.5 w-24">Total</th>
-                            <th className="p-3.5 w-36">Retiro Prog.</th>
-                            <th className="p-3.5 w-28 text-center">Estado</th>
-                            <th className="p-3.5 w-52 text-center">Gestión</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-white/5">
-                          {orders.filter(o => {
-                            const term = orderSearchTerm.trim().toLowerCase();
-                            const matchesSearch = !term ||
-                              o.id.toLowerCase().includes(term) ||
-                              o.cliente.toLowerCase().includes(term) ||
-                              o.telefono.toLowerCase().includes(term) ||
-                              o.productos.toLowerCase().includes(term);
 
-                            if (!matchesSearch) return false;
-                            if (orderFilterStatus === "all" && o.estado === "ARCHIVADO") return false;
-                            if (orderFilterStatus !== "all" && o.estado !== orderFilterStatus) return false;
-                            return true;
-                          }).length === 0 ? (
-                            <tr>
-                              <td colSpan={8} className="p-10 text-center text-slate-500 text-xs">
-                                Ningún pedido coincide con los filtros aplicados.
-                              </td>
-                            </tr>
-                          ) : (
-                            orders.filter(o => {
-                              const term = orderSearchTerm.trim().toLowerCase();
-                              const matchesSearch = !term ||
-                                o.id.toLowerCase().includes(term) ||
-                                o.cliente.toLowerCase().includes(term) ||
-                                o.telefono.toLowerCase().includes(term) ||
-                                o.productos.toLowerCase().includes(term);
+                      {/* Copiar Código Completo para Google Apps Script */}
+                      <div className="p-5 bg-[#111111] border border-white/10 rounded-2xl space-y-3">
+                        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+                          <div>
+                            <span className="text-xs font-bold text-white block">Código Apps Script Completo</span>
+                            <span className="text-[10px] text-slate-400 mt-0.5 block">Pega este código en "Extensiones &gt; Apps Script", ejecuta InstalarMagxorEngine() una vez y despliega como Aplicación web (Yo / Cualquiera).</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText(APPS_SCRIPT_TEMPLATE);
+                              setScriptCopied(true);
+                              showToast("¡Código copiado al portapapeles con éxito!", "success");
+                              setTimeout(() => setScriptCopied(false), 2000);
+                            }}
+                            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shrink-0 ${
+                              scriptCopied 
+                                ? "bg-emerald-600 border border-emerald-500 text-white" 
+                                : "bg-blue-600 hover:bg-blue-500 text-white border border-blue-500/20"
+                            }`}
+                          >
+                            {scriptCopied ? <Check className="w-4 h-4" /> : null}
+                            <span>{scriptCopied ? "¡Copiado!" : "📋 Copiar Código"}</span>
+                          </button>
+                        </div>
 
-                              if (!matchesSearch) return false;
-                              if (orderFilterStatus === "all" && o.estado === "ARCHIVADO") return false;
-                              if (orderFilterStatus !== "all" && o.estado !== orderFilterStatus) return false;
-                              return true;
-                            }).map((o, idx) => {
-                              const cleanPhone = o.telefono.replace(/[^0-9]/g, "");
-                              return (
-                                <tr key={idx} className="hover:bg-white/[0.01] transition-colors align-top">
-                                  {/* ID Pedido */}
-                                  <td className="p-3 font-mono text-[11px] font-extrabold text-blue-400">
-                                    {o.id}
-                                  </td>
-
-                                  {/* Fecha */}
-                                  <td className="p-3 text-slate-400 font-mono text-[11px] leading-relaxed">
-                                    {o.fecha}
-                                  </td>
-
-                                  {/* Cliente & Tel */}
-                                  <td className="p-3 text-slate-300">
-                                    <div className="font-semibold text-white leading-tight">
-                                      {o.cliente}
-                                    </div>
-                                    <div className="text-[10px] text-slate-500 font-mono mt-0.5">
-                                      {o.telefono}
-                                    </div>
-                                  </td>
-
-                                  {/* Productos detallados */}
-                                  <td className="p-3 text-slate-300">
-                                    {(() => {
-                                      const parsed = parseProductsString(o.productos);
-                                      const totalQty = parsed.reduce((sum, item) => sum + item.qty, 0);
-                                      const uniqueItems = parsed.length;
-                                      return (
-                                        <div className="space-y-1.5">
-                                          <div className="flex items-center gap-1.5 font-extrabold text-white text-xs">
-                                            <Package className="w-3.5 h-3.5 text-blue-400 shrink-0" />
-                                            <span>
-                                              {totalQty} {totalQty === 1 ? "artículo" : "artículos"}
-                                            </span>
-                                          </div>
-                                          <p className="text-[10px] text-slate-500">
-                                            ({uniqueItems} {uniqueItems === 1 ? "producto distinto" : "productos distintos"})
-                                          </p>
-                                          <button
-                                            type="button"
-                                            onClick={() => setSelectedOrderDetail(o)}
-                                            className="inline-flex items-center gap-1.5 text-[10.5px] font-bold text-blue-400 hover:text-blue-300 transition-colors cursor-pointer py-1 px-2 rounded-lg bg-blue-500/5 hover:bg-blue-500/10 border border-blue-500/15"
-                                          >
-                                            <Eye className="w-3.5 h-3.5" />
-                                            <span>Ver Artículos</span>
-                                          </button>
-                                        </div>
-                                      );
-                                    })()}
-                                  </td>
-
-                                  {/* Total */}
-                                  <td className="p-3 font-mono font-black text-white text-xs">
-                                    {formatPrice(o.total)}
-                                  </td>
-
-                                  {/* Entrega */}
-                                  <td className="p-3 text-slate-400 font-sans text-[11px] leading-tight">
-                                    {o.entrega}
-                                  </td>
-
-                                  {/* Estado Badge */}
-                                  <td className="p-3 text-center">
-                                    <span className={`inline-flex px-2 py-0.5 rounded-full text-[9px] font-extrabold border ${
-                                      o.estado === "PENDIENTE" ? "bg-amber-500/10 border-amber-500/20 text-amber-400" :
-                                      o.estado === "CONFIRMADO" ? "bg-blue-500/10 border-blue-500/20 text-blue-400" :
-                                      o.estado === "ENTREGADO" ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400" :
-                                      o.estado === "ARCHIVADO" ? "bg-purple-500/10 border-purple-500/20 text-purple-400" :
-                                      "bg-red-500/10 border-red-500/20 text-red-400"
-                                    }`}>
-                                      {o.estado}
-                                    </span>
-                                  </td>
-
-                                  {/* Acciones de administración */}
-                                  <td className="p-3">
-                                    <div className="flex flex-col gap-1.5 justify-center items-stretch">
-                                      {/* Status modifier triggers - Row 1 */}
-                                      <div className="flex gap-1 justify-center">
-                                        <button
-                                          type="button"
-                                          onClick={() => setSelectedOrderDetail(o)}
-                                          className="flex-1 py-1 px-1 bg-white/10 hover:bg-white/15 text-white text-[9.5px] font-black rounded border border-white/10 transition-colors cursor-pointer text-center flex items-center justify-center gap-0.5"
-                                          title="Ver comprobante e imprimir"
-                                        >
-                                          <Eye className="w-2.5 h-2.5 text-blue-400" />
-                                          <span>Ver Ticket</span>
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() => handleUpdateOrderStatus(o.id, "CONFIRMADO")}
-                                          className="flex-1 py-1 px-1 bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 text-[9.5px] font-extrabold rounded border border-blue-500/10 transition-colors cursor-pointer text-center"
-                                          title="Marcar como Confirmado"
-                                        >
-                                          Conf.
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() => handleUpdateOrderStatus(o.id, "ENTREGADO")}
-                                          className="flex-1 py-1 px-1 bg-emerald-500/10 hover:bg-emerald-400 text-emerald-400 text-[9.5px] font-extrabold rounded border border-emerald-500/10 transition-colors cursor-pointer text-center"
-                                          title="Marcar como Entregado"
-                                        >
-                                          Entr.
-                                        </button>
-                                      </div>
-
-                                      {/* Row 2: Contactar, Cancelar & Delete */}
-                                      <div className="flex gap-1 items-center justify-between">
-                                        <a
-                                          href={`https://wa.me/${cleanPhone}`}
-                                          target="_blank"
-                                          referrerPolicy="no-referrer"
-                                          className="flex-1 inline-flex items-center justify-center gap-1 py-1 px-1 bg-emerald-500 hover:bg-emerald-400 text-[#0F0F0F] text-[9.5px] font-black rounded transition-all cursor-pointer text-center font-sans shadow-sm"
-                                        >
-                                          <MessageSquare className="w-2.5 h-2.5" />
-                                          <span>WhatsApp</span>
-                                        </a>
-
-                                        <button
-                                          type="button"
-                                          onClick={() => handleUpdateOrderStatus(o.id, "CANCELADO")}
-                                          className="flex-1 py-1 px-1.2 bg-red-500/10 hover:bg-red-500/20 text-red-550 text-[9.5px] font-extrabold rounded border border-red-500/10 transition-colors cursor-pointer text-center"
-                                          title="Marcar como Cancelado"
-                                        >
-                                          Canc.
-                                        </button>
-
-                                        {orderToDeleteId === o.id ? (
-                                          <div className="flex items-center gap-1 bg-red-500/10 border border-red-500/20 rounded p-0.5 px-1 leading-none shrink-0">
-                                            <span className="text-[8px] text-red-400 font-bold">¿Borrar?</span>
-                                            <button
-                                              type="button"
-                                              onClick={() => handleDeleteOrder(o.id)}
-                                              className="text-[8px] uppercase font-mono font-black text-red-400 hover:text-red-300 transition-colors cursor-pointer"
-                                            >
-                                              SÍ
-                                            </button>
-                                            <span className="text-slate-600 font-mono">/</span>
-                                            <button
-                                              type="button"
-                                              onClick={() => setOrderToDeleteId(null)}
-                                              className="text-[8px] uppercase font-mono font-black text-slate-400 hover:text-white transition-colors cursor-pointer"
-                                            >
-                                              NO
-                                            </button>
-                                          </div>
-                                        ) : (
-                                          <button
-                                            type="button"
-                                            onClick={() => setOrderToDeleteId(o.id)}
-                                            className="p-1 px-1.5 bg-white/5 hover:bg-red-500/10 text-slate-500 hover:text-red-400 border border-white/5 hover:border-red-500/20 rounded transition-all cursor-pointer shrink-0"
-                                            title="Eliminar este pedido permanentemente"
-                                          >
-                                            <Trash2 className="w-3.5 h-3.5" />
-                                          </button>
-                                        )}
-                                      </div>
-
-                                      {/* Archivar button if Entregado or Cancelado */}
-                                      {o.estado !== "ARCHIVADO" && (o.estado === "ENTREGADO" || o.estado === "CANCELADO") && (
-                                        <button
-                                          type="button"
-                                          onClick={() => handleUpdateOrderStatus(o.id, "ARCHIVADO")}
-                                          className="w-full mt-1.5 py-1 px-2 bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 text-[9.5px] font-black rounded border border-purple-500/20 transition-all cursor-pointer text-center flex items-center justify-center gap-1 shadow-sm"
-                                          title="Archivar pedido"
-                                        >
-                                          📁 Archivar Pedido
-                                        </button>
-                                      )}
-                                    </div>
-                                  </td>
-                                </tr>
-                              );
-                            })
-                          )}
-                        </tbody>
-                      </table>
+                        <div className="relative">
+                          <pre className="text-[10px] text-slate-350 bg-[#0a0a0a] border border-white/5 rounded-xl p-4 max-h-56 overflow-y-auto font-mono select-all leading-normal">
+                            {APPS_SCRIPT_TEMPLATE}
+                          </pre>
+                        </div>
+                      </div>
                     </div>
                   )}
                 </div>
               )}
-              
+
+              {/* TAB 4: CLIENTS LIST (solo quienes hicieron pedidos) */}
+              {activeTab === "clients" && (
+                <OrderClientsCards
+                  orders={orders}
+                  isLoading={isLoadingOrders || isLoadingClients}
+                  onRefresh={() => { fetchOrders(); fetchClients(true); }}
+                />
+              )}
+
+              {/* TAB 5: ORDERS LIST (tarjetas) */}
+              {activeTab === "orders" && (
+                <OrderCardsTab
+                  orders={orders}
+                  isLoading={isLoadingOrders}
+                  onRefresh={() => { fetchOrders(); fetchClients(true); }}
+                  onUpdateStatus={handleUpdateOrderStatus}
+                  onDelete={handleDeleteOrder}
+                  onSaveDetail={handleSaveOrderDetail}
+                  canEdit={userRole !== "USUARIO"}
+                  parseProducts={parseProductsString}
+                  priceOf={(name) => allProducts.find((pr) => pr.name.trim().toLowerCase() === name.trim().toLowerCase())?.price || 0}
+                />
+              )}
+
             </div>
           </>
         )}
@@ -3770,7 +3247,9 @@ export default function AdminPortal({
         const productsMap: { [key: string]: { qty: number; name: string; totalAmount: number } } = {};
 
         billingFilteredOrders.forEach(o => {
-          const payMethod = o.metodoPago || "No especificado";
+          // Método = Retiro en local o Envío (derivado de ENTREGA)
+          const entregaLower = String(o.entrega || "").toLowerCase();
+          const payMethod = entregaLower.includes("env") ? "Envío" : "Retiro en local";
           if (!salesByPaymentMethod[payMethod]) {
             salesByPaymentMethod[payMethod] = { count: 0, total: 0 };
           }
@@ -3817,7 +3296,7 @@ export default function AdminPortal({
                 <div>
                   <h3 className="text-base font-black text-white">{modalTitle}</h3>
                   <p className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">
-                    Periodo: {billingPeriod === "hoy" ? "Hoy" : billingPeriod === "7dias" ? "Últimos 7 días" : billingPeriod === "30dias" ? "Últimos 30 días" : "Personalizado"}
+                    Periodo: {billingPeriod === "hoy" ? "Hoy" : billingPeriod === "7dias" ? "Últimos 7 días" : billingPeriod === "siempre" ? "Desde siempre" : "Personalizado"}
                   </p>
                 </div>
               </div>
@@ -3860,10 +3339,10 @@ export default function AdminPortal({
                                     <p className="font-bold text-white leading-tight">{o.cliente}</p>
                                     <p className="text-[10px] text-slate-500">ID: {o.id}</p>
                                   </td>
-                                  <td className="p-3 text-slate-400">{o.fecha}</td>
+                                  <td className="p-3 text-slate-400">{formatearFechaES(o.fecha)}</td>
                                   <td className="p-3">
                                     <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-white/5 text-slate-300">
-                                      {o.metodoPago || "N/A"}
+                                      {String(o.entrega || "").toLowerCase().includes("env") ? "Envío" : "Retiro en local"}
                                     </span>
                                   </td>
                                   <td className="p-3 text-right font-bold text-white">{formatPrice(o.total)}</td>
@@ -4352,382 +3831,6 @@ export default function AdminPortal({
           </div>
         </div>
       )}
-
-      {/* --- SELECTED ORDER DETAIL (TICKET) MODAL --- */}
-      {selectedOrderDetail && (() => {
-        const cleanPhone = selectedOrderDetail.telefono.replace(/[^0-9]/g, "");
-        const parsedItems = parseProductsString(selectedOrderDetail.productos).map(item => {
-          const matchedProd = allProducts.find(p => p.name.trim().toLowerCase() === item.name.trim().toLowerCase());
-          const unitPrice = matchedProd ? matchedProd.price : 0;
-          return {
-            ...item,
-            unitPrice,
-            subtotal: unitPrice * item.qty
-          };
-        });
-
-        // Let's see if we have some calculated sub price totals
-        const calculatedSubtotal = parsedItems.reduce((acc, curr) => acc + curr.subtotal, 0);
-        const subtotalToDisplay = calculatedSubtotal > 0 ? calculatedSubtotal : selectedOrderDetail.total;
-
-        return createPortal(
-          <div id="print-modal-container" className="fixed inset-0 z-55 flex justify-center py-6 md:py-12 px-4 bg-black/90 backdrop-blur-sm overflow-y-auto">
-            <style dangerouslySetInnerHTML={{ __html: `
-              @media print {
-                html, body {
-                  background: #ffffff !important;
-                  color: #000000 !important;
-                  margin: 0 !important;
-                  padding: 0 !important;
-                  height: auto !important;
-                  min-height: auto !important;
-                  overflow: visible !important;
-                  -webkit-print-color-adjust: exact !important;
-                  print-color-adjust: exact !important;
-                }
-                /* Hide the react mount point / main application wrapper entirely */
-                #root, .no-print, nav, header, footer {
-                  display: none !important;
-                }
-                /* Show ONLY the print modal container */
-                #print-modal-container {
-                  position: static !important;
-                  display: block !important;
-                  width: 100% !important;
-                  height: auto !important;
-                  min-height: auto !important;
-                  background: #ffffff !important;
-                  color: #000000 !important;
-                  z-index: auto !important;
-                  padding: 0 !important;
-                  margin: 0 !important;
-                  box-shadow: none !important;
-                  transform: none !important;
-                  overflow: visible !important;
-                }
-                .print-card-box {
-                  position: static !important;
-                  display: block !important;
-                  border: none !important;
-                  background: #ffffff !important;
-                  color: #000000 !important;
-                  box-shadow: none !important;
-                  width: 100% !important;
-                  max-width: 100% !important;
-                  margin: 0 !important;
-                  padding: 1cm !important;
-                  overflow: visible !important;
-                }
-                /* Format printing pages */
-                @page {
-                  size: auto;
-                  margin: 1.5cm;
-                }
-                .print-accent {
-                  color: #000000 !important;
-                  border-color: #cccccc !important;
-                }
-                /* Force light-contrast colors for all elements inside modal on print */
-                #print-modal-container,
-                #print-modal-container * {
-                  color: #000000 !important;
-                  border-color: #cccccc !important;
-                  background-color: transparent !important;
-                }
-                .overflow-x-auto {
-                  overflow: visible !important;
-                  display: block !important;
-                  max-width: 100% !important;
-                }
-                table {
-                  display: table !important;
-                  width: 100% !important;
-                  border-collapse: collapse !important;
-                  page-break-inside: auto !important;
-                }
-                thead {
-                  display: table-header-group !important;
-                }
-                tfoot {
-                  display: table-footer-group !important;
-                }
-                tbody {
-                  display: table-row-group !important;
-                }
-                tr {
-                  page-break-inside: avoid !important;
-                  page-break-after: auto !important;
-                }
-                td, th {
-                  page-break-inside: avoid !important;
-                }
-                .page-break {
-                  page-break-inside: avoid !important;
-                  break-inside: avoid !important;
-                }
-              }
-            ` }} />
-            
-            <div className="relative bg-[#111111] border border-white/10 rounded-3xl w-full max-w-2xl p-6 md:p-8 shadow-2xl text-slate-300 print-card-box my-auto">
-              {/* Close Button (Hidden on Print) */}
-              <button
-                onClick={() => setSelectedOrderDetail(null)}
-                className="absolute top-4 right-4 p-2 bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white rounded-full transition-colors cursor-pointer no-print"
-                title="Cerrar ticket"
-              >
-                <X className="w-5 h-5" />
-              </button>
-
-              {/* Title Header (Hidden on Print) */}
-              <div className="mb-6 pb-4 border-b border-white/5 flex flex-col gap-4 no-print">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className="p-2 bg-blue-500/10 text-blue-400 rounded-xl">
-                      <Printer className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <h2 className="text-sm font-black text-white uppercase tracking-wider font-sans">
-                        Comprobante de Pedido
-                      </h2>
-                      <p className="text-[10px] text-slate-500">
-                        ID: {selectedOrderDetail.id}
-                      </p>
-                    </div>
-                  </div>
-                  <div>
-                    <button
-                      onClick={() => {
-                        window.print();
-                      }}
-                      className="py-1.5 px-3.5 bg-emerald-500 hover:bg-emerald-400 text-neutral-950 text-xs font-black rounded-lg flex items-center gap-1.5 cursor-pointer shadow-md transition-all active:scale-95 animate-pulse"
-                    >
-                      <Printer className="w-4 h-4" />
-                      <span>Imprimir / PDF</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Helpful PDF tutorial tooltip */}
-                <div className="text-[10.5px] text-amber-450 bg-amber-500/5 border border-amber-500/10 rounded-xl p-3 flex gap-2.5 items-start">
-                  <span className="text-sm shrink-0 leading-none">💡</span>
-                  <div className="space-y-0.5 leading-normal">
-                    <p className="font-extrabold text-amber-300">¿Cómo descargarlo como PDF?</p>
-                    <p className="text-slate-400">
-                      Al presionar <strong className="text-white">"Imprimir / PDF"</strong>, en la opción de <strong className="text-white">"Destino"</strong> u <strong className="text-white">"Impresora"</strong> de tu dispositivo, seleccioná <strong className="text-amber-400">"Guardar como PDF"</strong> para descargarlo rápido en tu cel o PC.
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {/* TICKET CONTAINER SHEET (Optimized for Printer & Contrast) */}
-              <div className="bg-neutral-950/20 border border-white/5 rounded-2xl p-6 print-accent text-slate-200">
-                
-                <table className="w-full border-collapse">
-                  {/* Repeated Header during printing */}
-                  <thead>
-                    <tr>
-                      <td>
-                        {/* Header Logo & Store details */}
-                        <div className="flex flex-col md:flex-row md:justify-between items-center gap-4 border-b border-dashed border-white/15 pb-6 mb-6 print-accent text-left">
-                          <div className="flex items-center gap-3.5">
-                            <div className="w-14 h-14 bg-white/5 text-white rounded-2xl border border-white/10 flex items-center justify-center p-1 overflow-hidden print:border-neutral-300 relative">
-                              {!logoError ? (
-                                <img 
-                                  src="/logo.png" 
-                                  alt="Logo" 
-                                  referrerPolicy="no-referrer"
-                                  className="w-full h-full object-contain"
-                                  onError={() => {
-                                    setLogoError(true);
-                                  }}
-                                />
-                              ) : (
-                                <span className="text-xl font-bold font-mono">
-                                  {webSettings.nombreWeb ? webSettings.nombreWeb.charAt(0).toUpperCase() : "M"}
-                                </span>
-                              )}
-                            </div>
-                            <div>
-                              <h1 className="text-base font-black text-white uppercase tracking-tight print:text-black text-left">
-                                {webSettings.nombreWeb || "Mi Catálogo Digital"}
-                              </h1>
-                              <p className="text-[10px] text-slate-400 font-sans print:text-neutral-600 font-medium text-left">
-                                {webSettings.direccion || "Ventas on-line"}
-                              </p>
-                            </div>
-                          </div>
-
-                          <div className="text-center md:text-right font-mono text-[10.5px] leading-relaxed text-slate-400 print:text-neutral-600">
-                            <div className="text-white font-extrabold print:text-black">ID PEDIDO: {selectedOrderDetail.id}</div>
-                            <div>Fecha: {selectedOrderDetail.fecha}</div>
-                            <div>Contacto: {webSettings.contactoTicket || webSettings.contactoMinorista || webSettings.contactoMayorista || "-"}</div>
-                          </div>
-                        </div>
-
-                        {/* Cliente / Datos de la entrega */}
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 border-b border-dashed border-white/15 pb-6 mb-6 print-accent text-left">
-                          <div>
-                            <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 print:text-neutral-500">
-                              Datos del Cliente
-                            </h3>
-                            <div className="text-xs font-bold text-white print:text-black space-y-0.5">
-                              <p className="text-sm font-black">{selectedOrderDetail.cliente}</p>
-                              <p className="font-mono text-[11px] text-slate-300 print:text-neutral-700">Tel: {selectedOrderDetail.telefono}</p>
-                            </div>
-                          </div>
-                          <div>
-                            <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 print:text-neutral-500">
-                              Forma de Entrega / Retiro
-                            </h3>
-                            <div className="text-xs font-semibold text-slate-200 print:text-black space-y-1.5">
-                              <div className="inline-block py-1 px-2.5 rounded-lg bg-white/5 border border-white/10 text-xs font-bold print:border-neutral-300 print:bg-neutral-105">
-                                {(() => {
-                                  const parts = selectedOrderDetail.entrega.split(" - ");
-                                  if (parts.length === 2) {
-                                    return (
-                                      <div className="space-y-1 text-left">
-                                        <div className="flex items-center gap-1.5">
-                                          <span className="text-[10px]">📅</span>
-                                          <span>Retiro: <span className="text-blue-400 print:text-black font-extrabold">{parts[0]}</span></span>
-                                        </div>
-                                        <div className="flex items-center gap-1.5">
-                                          <span className="text-[10px]">⏰</span>
-                                          <span>Horario: <span className="text-emerald-400 print:text-black font-extrabold">{parts[1]}</span></span>
-                                        </div>
-                                      </div>
-                                    );
-                                  }
-                                  return <span>{selectedOrderDetail.entrega}</span>;
-                                })()}
-                              </div>
-                              <p className="text-[10px] text-slate-400 mt-0.5 font-mono">Estado: {selectedOrderDetail.estado}</p>
-                            </div>
-                          </div>
-                        </div>
-                      </td>
-                    </tr>
-                  </thead>
-
-                  {/* Main items body wrapper */}
-                  <tbody>
-                    <tr>
-                      <td>
-                        {/* Products items table list */}
-                        <div className="mb-6 pt-2 text-left">
-                          <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2.5 print:text-neutral-500">
-                            Detalle de Artículos
-                          </h3>
-                          
-                          {parsedItems.length > 0 ? (
-                            <div className="overflow-x-auto">
-                              <table className="w-full text-left text-xs font-sans">
-                                <thead>
-                                  <tr className="border-b border-white/10 text-[9.5px] uppercase font-bold text-slate-400 tracking-wider print:text-neutral-500 print:border-neutral-300">
-                                    <th className="py-2">Artículo</th>
-                                    <th className="py-2 text-center w-16">Cant.</th>
-                                    <th className="py-2 text-right w-28">P. Unit</th>
-                                    <th className="py-2 text-right w-28">Subtotal</th>
-                                  </tr>
-                                </thead>
-                                <tbody className="divide-y divide-white/5 print:divide-neutral-200">
-                                  {parsedItems.map((item, i) => (
-                                    <tr key={i} className="text-slate-200 print:text-black page-break">
-                                      <td className="py-2.5 font-medium pr-2">{item.name}</td>
-                                      <td className="py-2.5 text-center font-mono font-bold text-slate-400 print:text-black">{item.qty} u.</td>
-                                      <td className="py-2.5 text-right font-mono text-slate-400 print:text-black">{item.unitPrice > 0 ? formatPrice(item.unitPrice) : "-"}</td>
-                                      <td className="py-2.5 text-right font-mono font-bold text-white print:text-black">{item.unitPrice > 0 ? formatPrice(item.subtotal) : "-"}</td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            </div>
-                          ) : (
-                            <div className="text-xs text-slate-300 bg-white/5 p-3.5 rounded-xl border border-white/5 whitespace-pre-wrap leading-relaxed print:text-black print:bg-neutral-100 print:border-none">
-                              {selectedOrderDetail.productos}
-                            </div>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  </tbody>
-
-                  {/* Repeated Footer section */}
-                  <tfoot>
-                    <tr>
-                      <td>
-                        {/* Totales */}
-                        <div className="flex flex-col items-end border-t border-dashed border-white/15 pt-4 print-accent page-break">
-                          <div className="w-full md:w-80 space-y-1.5 font-mono text-xs">
-                            {parsedItems.length > 0 && (
-                              <div className="flex justify-between text-slate-400 print:text-neutral-500">
-                                <span>Suma Subtotal:</span>
-                                <span>{formatPrice(subtotalToDisplay)}</span>
-                              </div>
-                            )}
-                            <div className="flex justify-between text-sm font-black text-white border-t border-white/5 pt-1.5 print:text-black print:border-neutral-300">
-                              <span className="uppercase tracking-wide">TOTAL IMPORTE:</span>
-                              <span className="text-base text-emerald-400 print:text-black font-extrabold">{formatPrice(selectedOrderDetail.total)}</span>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* QR Code and digital branding watermark footer */}
-                        <div className="mt-8 pt-6 border-t border-dashed border-white/15 flex flex-col sm:flex-row items-center justify-between gap-4 print-accent text-center sm:text-left page-break">
-                          <div className="space-y-1 text-left">
-                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-wide print:text-neutral-500">
-                              Soporte y Gestión Digital
-                            </p>
-                            <p className="text-xs font-black text-white print:text-black tracking-tight mt-0.5">
-                              - Sistema creado por Magxor Digital -
-                            </p>
-                            <p className="text-[9px] text-slate-500 print:text-neutral-400 font-mono mt-0.5">
-                              Desarrollos Web y de Comercio Electrónico
-                            </p>
-                          </div>
-                          
-                          {/* QR Code leading to magxordigital.netlify.app */}
-                          <div className="flex flex-col items-center gap-1 bg-white p-2 rounded-xl border border-white/10 shrink-0 print:border-neutral-300">
-                            <img 
-                              src={`https://api.qrserver.com/v1/create-qr-code/?size=90x90&data=https://magxordigital.netlify.app`} 
-                              alt="QR Code Magxor" 
-                              className="w-16 h-16 object-contain"
-                            />
-                            <span className="text-[8px] font-extrabold text-neutral-950 font-mono tracking-tighter uppercase">
-                              magxordigital
-                            </span>
-                          </div>
-                        </div>
-                      </td>
-                    </tr>
-                  </tfoot>
-                </table>
-
-              </div>
-
-              {/* Action Buttons (Footer - Hidden on Print) */}
-              <div className="mt-6 pt-4 border-t border-white/5 flex gap-3 no-print">
-                <button
-                  type="button"
-                  onClick={() => setSelectedOrderDetail(null)}
-                  className="w-1/3 py-2.5 bg-white/5 hover:bg-white/15 border border-white/10 text-white rounded-xl text-xs font-semibold cursor-pointer transition-colors"
-                >
-                  Cerrar
-                </button>
-                <button
-                  onClick={() => {
-                    window.print();
-                  }}
-                  className="w-2/3 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-neutral-950 rounded-xl text-xs font-black shadow-lg shadow-emerald-500/10 flex items-center justify-center gap-1.5 cursor-pointer transition-all active:scale-95"
-                >
-                  <Printer className="w-4 h-4" /> Imprimir / Descargar PDF
-                </button>
-              </div>
-
-            </div>
-          </div>,
-          document.body
-        );
-      })()}
 
       {/* NEW ORDER NOTIFICATION POPUP */}
       {newOrderPopupData && (

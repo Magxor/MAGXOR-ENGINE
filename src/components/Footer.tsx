@@ -6,12 +6,13 @@ interface FooterProps {
   onSubscribeNewsletter: (phone: string) => void;
   onAdminClick: () => void;
   nombreWeb?: string;
+  slogan?: string;
   logoUrl?: string;
   direccion?: string;
   contactoMinorista?: string;
 }
 
-export default function Footer({ onNavigateToSection, onSubscribeNewsletter, onAdminClick, nombreWeb, logoUrl, direccion, contactoMinorista }: FooterProps) {
+export default function Footer({ onNavigateToSection, onSubscribeNewsletter, onAdminClick, nombreWeb, slogan, logoUrl, direccion, contactoMinorista }: FooterProps) {
   const [newsPhone, setNewsPhone] = useState("");
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -36,6 +37,7 @@ export default function Footer({ onNavigateToSection, onSubscribeNewsletter, onA
               {nombreWeb || "Magxor Engine"}
             </span>
           </div>
+          {slogan && <p className="text-[11px] text-blue-400/90 font-medium uppercase tracking-widest">{slogan}</p>}
           <p className="text-xs leading-relaxed text-slate-500">
             {direccion ? `${direccion}. ` : ""}Tu tienda online de confianza.
           </p>

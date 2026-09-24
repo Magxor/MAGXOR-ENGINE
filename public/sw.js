@@ -1,5 +1,5 @@
 // Magxor Engine - Basic Offline Service Worker (PWA-Ready Cache)
-const CACHE_NAME = 'magxor-engine-v1';
+const CACHE_NAME = 'magxor-engine-v2';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',

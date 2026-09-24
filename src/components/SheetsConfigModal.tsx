@@ -188,7 +188,7 @@ function handleRequest(e) {
         }
       }
     }
-  } else if (action === "updateSettings") {
+  } else if (action === "updateConfig") {
     var datosSheet = sheet.getSheetByName("DATOS");
     if (!datosSheet) {
       datosSheet = sheet.insertSheet("DATOS");

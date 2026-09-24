@@ -9,6 +9,7 @@
   
   --animate-slide-in-right: slide-in-right 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   --animate-slide-in-down: slide-in-down 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  --animate-slide-in-up: slide-in-up 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   --animate-scale-in: scale-in 0.32s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
   --animate-fade-in: fade-in 0.3s ease-out forwards;
   --animate-marquee: marquee 25s linear infinite;
@@ -27,6 +28,17 @@
   @keyframes slide-in-down {
     from {
       transform: translateY(-20px);
+      opacity: 0;
+    }
+    to {
+      transform: translateY(0);
+      opacity: 1;
+    }
+  }
+
+  @keyframes slide-in-up {
+    from {
+      transform: translateY(20px);
       opacity: 0;
     }
     to {
@@ -103,10 +115,16 @@
 html {
   scroll-behavior: smooth;
   background-color: #0A0A0A;
+  height: 100%;
+  overscroll-behavior: none;
 }
 
 body {
   font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   background-color: #0A0A0A;
   color: #e2e8f0;
+  min-height: 100dvh;
+  /* Compensa notch / barras del sistema en PWA standalone */
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
 }

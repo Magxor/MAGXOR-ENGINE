@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { X, ShoppingCart, Info, Check, ShieldCheck, Sparkles, Star, MessageSquare, Send, Download } from "lucide-react";
 import { Product, ReviewItem } from "../types";
 import { formatPrice } from "../utils";
+import { formatearFechaES } from "../lib/fecha";
 
 interface ProductDetailProps {
   product: Product;
@@ -470,7 +471,7 @@ export default function ProductDetailModal({
                     >
                       <div className="flex justify-between items-center">
                         <span className="font-bold text-slate-100">{r.name}</span>
-                        <span className="text-[10px] text-slate-500">{r.date}</span>
+                        <span className="text-[10px] text-slate-500">{formatearFechaES(r.date)}</span>
                       </div>
                       
                       {/* Review stars */}

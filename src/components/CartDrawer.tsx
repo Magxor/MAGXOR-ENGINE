@@ -3,6 +3,7 @@ import { X, Trash2, ShoppingBag, MapPin, Loader, ChevronRight, Calendar, Clock }
 import { CartItem } from "../types";
 import { checkShopStatus, formatPrice, submitToAppsScript } from "../utils";
 import { api, isEndpointConfigured } from "../lib/api";
+import { formatearFechaES, fechaActualES } from "../lib/fecha";
 
 const getNextDaysOptions = (): string[] => {
   const days: string[] = [];
@@ -97,6 +98,7 @@ interface CartDrawerProps {
     contactoMinorista: string;
     contactoMayorista: string;
     paletaColores: string;
+    estadoCuenta?: string;
   };
 }
 
@@ -167,6 +169,10 @@ export default function CartDrawer({
 
   const handleCheckout = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (String(webSettings?.estadoCuenta || "SI").toUpperCase() === "NO") {
+      alert("Cuenta pausada por falta de pago. Tu web seguirá activa, pero no podrás administrarla ni recibir pedidos.");
+      return;
+    }
     if (!clientName.trim()) {
       alert("Por favor, ingresá tu nombre completo.");
       return;
@@ -183,7 +189,7 @@ export default function CartDrawer({
         : "📅 *Pedido Programado* (Tu pedido será preparado en nuestros horarios de atención)";
 
       const orderId = "PED-" + Math.floor(100000 + Math.random() * 900000);
-      const dateFormatted = new Date().toLocaleDateString("es-AR") + " " + new Date().toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
+      const dateFormatted = fechaActualES();
 
       // Submit to Apps Script endpoint seguro primero (fallback legacy GET)
       const prodSummary = cartItems.map(item => `[${item.quantity} uni] ${item.product.name}`).join("\n");

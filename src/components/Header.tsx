@@ -13,6 +13,7 @@ interface HeaderProps {
   onNavigateToSection: (sectionId: string) => void;
   webSettings?: {
     nombreWeb: string;
+    slogan?: string;
     horarios: string;
     direccion: string;
     contactoMinorista: string;
@@ -130,7 +131,7 @@ export default function Header({
               <h1 className="text-base sm:text-lg font-bold tracking-tighter text-white">
                 {webSettings?.nombreWeb || "Magxor Engine"}
               </h1>
-              <p className="hidden sm:block text-[9px] text-blue-400 font-medium uppercase tracking-widest leading-none mt-0.5">Precios Competentes</p>
+              <p className="hidden sm:block text-[9px] text-blue-400 font-medium uppercase tracking-widest leading-none mt-0.5">{webSettings?.slogan || "Slogan"}</p>
             </div>
           </button>
 
