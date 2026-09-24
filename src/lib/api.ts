@@ -131,6 +131,9 @@ export const api = {
   listUsers: (adminPass: string, session?: string) =>
     post<{ users: any[] }>({ action: "listUsers", adminPass, session: session || sessionGet() }),
   addOrder: (p: Record<string, unknown>) => post({ action: "addOrder", ...p }),
+  // Registra un carrito perdido en AUDIT_LOG (se acepta incluso con la
+  // cuenta suspendida; no crea pedidos).
+  logLostCart: (p: Record<string, unknown>) => post({ action: "logLostCart", ...p }),
   addReview: (p: Record<string, unknown>) => post({ action: "addReview", ...p }),
   addClient: (p: Record<string, unknown>) => post({ action: "addClient", ...p }),
   login: (username: string, password: string) =>

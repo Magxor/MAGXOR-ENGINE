@@ -999,8 +999,12 @@ export default function App() {
   }, [webSettings.faviconUrl, webSettings.logoUrl, webSettings.seoTitulo, webSettings.nombreWeb]);
 
   if (isSuspended) {
-    const suspImg = String((webSettings as Record<string, unknown>).suspensionImageUrl || "");
-    const suspMsg = String((webSettings as Record<string, unknown>).suspensionMensaje || "Tienda suspendida. Contactanos por WhatsApp.");
+    // Suspensión con contenido configurado (SUSPENSION_IMAGE_URL y/o
+    // SUSPENSION_MENSAJE): se muestra lo que cargó el operador.
+    // Sin contenido: pantalla neutra que NO invita a ningún contacto
+    // (sin botones de WhatsApp, contacto ni formularios).
+    const suspImg = String((webSettings as Record<string, unknown>).suspensionImageUrl || "").trim();
+    const suspMsg = String((webSettings as Record<string, unknown>).suspensionMensaje || "").trim();
     return (
       <div className="font-sans min-h-screen flex flex-col items-center justify-center bg-[#0A0A0A] text-slate-200 p-6 text-center">
         {suspImg ? (
@@ -1009,7 +1013,7 @@ export default function App() {
           <div className="w-20 h-20 rounded-3xl bg-white/5 border border-white/10 flex items-center justify-center text-3xl mb-6">⏸</div>
         )}
         <h1 className="text-xl font-bold text-white">{webSettings.nombreWeb || "Magxor Engine"}</h1>
-        <p className="text-sm text-slate-400 mt-2 max-w-sm">{suspMsg}</p>
+        <p className="text-sm text-slate-400 mt-2 max-w-sm">{suspMsg || "Tienda temporalmente inhabilitada."}</p>
       </div>
     );
   }

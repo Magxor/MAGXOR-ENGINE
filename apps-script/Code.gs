@@ -17,6 +17,13 @@
  * - updateConfig ahora hace lectura-modificación-escritura: solo pisa los
  *   campos enviados y escribe alineado a los encabezados reales de la hoja
  *   (antes borraba SEO/splash/moneda/estado en cada guardado del Admin).
+ *
+ * CARRITOS PERDIDOS (suspensión):
+ * - addOrder bloqueado por estado NO/ATRASO → se asienta en AUDIT_LOG como
+ *   'carrito_perdido' con detalle completo (cliente, teléfono, productos,
+ *   total, entrega).
+ * - Nueva acción pública 'logLostCart': el frontend registra el checkout
+ *   bloqueado localmente. Se acepta en cualquier estado y no crea pedidos.
  * 
  * Pegar en Extensiones > Apps Script, luego ejecutar setupMagxor() una vez
  * y desplegar como Aplicación web (Ejecutar como: Yo / Acceso: Cualquiera).
@@ -227,8 +234,9 @@ function handleRequest(e) {
       if (action === 'getProducts') return json({ status: 'ok', products: readProducts() });
       return json({ status: 'ok', reviews: readReviews() });
     }
-    // Escrituras públicas limitadas
-    if (action === 'addOrder' || action === 'addReview' || action === 'addClient') {
+    // Escrituras públicas limitadas (logLostCart registra carritos perdidos
+    // incluso con la cuenta suspendida: su propósito es auditar la demanda)
+    if (action === 'addOrder' || action === 'addReview' || action === 'addClient' || action === 'logLostCart') {
       return handlePublicWrite(action, params);
     }
     // Todo lo demás requiere sesión admin
@@ -620,9 +628,19 @@ function handlePublicWrite(action, p) {
       if (phone.length < 6) throw new Error('Teléfono inválido.');
       cs.appendRow([phone, s(p.date, 30), s(p.metodo, 40) || 'Club WhatsApp', 'NO']);
     } else if (action === 'addOrder') {
-      // LOS PEDIDOS SE BLOQUEAN SI ESTADO ES NO O ATRASO
+      // LOS PEDIDOS SE BLOQUEAN SI ESTADO ES NO O ATRASO.
+      // El intento queda asentado como CARRITO PERDIDO en AUDIT_LOG con todo
+      // el detalle (cliente, teléfono, productos, total) para medir la demanda
+      // que se pierde mientras la cuenta está suspendida.
       if (estado === 'NO' || estado === 'ATRASO') {
-        auditLog('público', 'intento_pedido_bloqueado', { estado: estado }, estado, estado);
+        auditLog('público', 'carrito_perdido', {
+          cliente: s(p.cliente || p.nombre, 120),
+          telefono: String(p.telefono || '').replace(/[^0-9+]/g, '').slice(0, 20),
+          productos: s(p.productos, 5000),
+          total: parseFloat(p.total) || 0,
+          entrega: s(p.entrega, 120),
+          motivo: 'estado_cuenta_' + estado
+        }, estado, estado);
         throw new Error('ESTADO_BLOQUEADO|La tienda no está recibiendo pedidos en este momento. Por favor, intenta más tarde.');
       }
       var os = ensureSheet(ss, SHEETS.pedidos, PED_HEADERS);
@@ -648,6 +666,19 @@ function handlePublicWrite(action, p) {
       }
 
       auditLog('público', 'pedido_creado', { cliente: clienteNombre }, 'SI', 'SI');
+    } else if (action === 'logLostCart') {
+      // Registro explícito de carritos perdidos desde el frontend (checkout
+      // bloqueado localmente). Se acepta en CUALQUIER estado de cuenta y NO
+      // crea pedidos: solo deja constancia en AUDIT_LOG.
+      auditLog('público', 'carrito_perdido', {
+        cliente: s(p.cliente || p.nombre, 120),
+        telefono: String(p.telefono || '').replace(/[^0-9+]/g, '').slice(0, 20),
+        productos: s(p.productos, 5000),
+        total: parseFloat(p.total) || 0,
+        entrega: s(p.entrega, 120),
+        motivo: 'checkout_bloqueado_' + estado,
+        origen: s(p.origen, 40) || 'frontend'
+      }, estado, estado);
     }
     return json({ status: 'ok', action: action });
   } finally { lock.releaseLock(); }

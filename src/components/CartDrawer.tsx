@@ -170,7 +170,22 @@ export default function CartDrawer({
   const handleCheckout = async (e: React.FormEvent) => {
     e.preventDefault();
     if (String(webSettings?.estadoCuenta || "SI").toUpperCase() === "NO") {
-      alert("Cuenta pausada por falta de pago. Tu web seguirá activa, pero no podrás administrarla ni recibir pedidos.");
+      // Cuenta suspendida: no se envía el pedido ni se abre WhatsApp.
+      // El intento queda registrado como CARRITO PERDIDO en AUDIT_LOG.
+      try {
+        if (isEndpointConfigured()) {
+          const lostSummary = cartItems.map(item => `[${item.quantity} uni] ${item.product.name}`).join("\n");
+          await api.logLostCart({
+            cliente: clientName.trim(),
+            telefono: clientPhone.trim() || "-",
+            productos: lostSummary,
+            total: subtotal,
+            entrega: `${deliveryDay} - ${deliveryHour}`,
+            origen: "checkout_bloqueado"
+          });
+        }
+      } catch { /* el registro nunca debe impedir el aviso al visitante */ }
+      alert("La tienda no está recibiendo pedidos en este momento.");
       return;
     }
     if (!clientName.trim()) {
@@ -205,9 +220,20 @@ export default function CartDrawer({
         estado: "PENDIENTE"
       };
       if (isEndpointConfigured()) {
-        await api.addOrder(orderParams).catch(err => {
+        try {
+          await api.addOrder(orderParams);
+        } catch (err) {
+          const errMsg = String((err as Error)?.message || err || "");
+          if (errMsg.includes("ESTADO_BLOQUEADO")) {
+            // Cuenta suspendida detectada en el backend (el frontend tenía
+            // config vieja). El intento ya fue asentado allá como
+            // carrito_perdido. Se corta el flujo: sin WhatsApp, sin vaciar
+            // el carrito.
+            alert("La tienda no está recibiendo pedidos en este momento.");
+            return;
+          }
           console.error("Error logging order via endpoint:", err);
-        });
+        }
       } else if (backendUrl) {
         // We await the submission to ensure Google Sheets receives the data before we leave the page
         await submitToAppsScript(backendUrl, orderParams).catch(err => {
