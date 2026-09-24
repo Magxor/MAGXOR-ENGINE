@@ -620,7 +620,9 @@ export default function App() {
 
   // --- Cart Operations ---
   const handleAddToCart = (product: Product, quantity = 1) => {
-    if (!exigirTiendaActiva()) return;
+    // Con la cuenta suspendida se permite agregar al carrito a propósito:
+    // el checkout lo bloquea y registra el intento como carrito_perdido
+    // en AUDIT_LOG (demanda perdida mientras dura la suspensión).
     setCartItems((prev) => {
       const existing = prev.find((item) => item.product.id === product.id);
       let updated: CartItem[];
@@ -948,7 +950,8 @@ export default function App() {
       const el = document.getElementById("catalogo");
       if (el) el.scrollIntoView({ behavior: "smooth" });
     } else if (sectionId === "horarios-contacto") {
-      // Opends Horarios y Contacto modal
+      // Opends Horarios y Contacto modal (bloqueado con cuenta suspendida)
+      if (!exigirTiendaActiva()) return;
       setShowHorariosContactoModal(true);
     } else {
       const el = document.getElementById(sectionId);
@@ -966,7 +969,7 @@ export default function App() {
 
   const exigirTiendaActiva = (): boolean => {
     if (isTiendaBloqueada) {
-      showToast("Cuenta pausada por falta de pago. Tu web seguirá activa, pero no podrás administrarla ni recibir pedidos.", "error");
+      showToast("La tienda no está disponible para consultas ni pedidos en este momento.", "error");
       return false;
     }
     return true;
@@ -1000,22 +1003,26 @@ export default function App() {
 
   if (isSuspended) {
     // Suspensión con contenido configurado (SUSPENSION_IMAGE_URL y/o
-    // SUSPENSION_MENSAJE): se muestra lo que cargó el operador.
-    // Sin contenido: pantalla neutra que NO invita a ningún contacto
-    // (sin botones de WhatsApp, contacto ni formularios).
+    // SUSPENSION_MENSAJE): pantalla completa con lo que cargó el operador.
     const suspImg = String((webSettings as Record<string, unknown>).suspensionImageUrl || "").trim();
     const suspMsg = String((webSettings as Record<string, unknown>).suspensionMensaje || "").trim();
-    return (
-      <div className="font-sans min-h-screen flex flex-col items-center justify-center bg-[#0A0A0A] text-slate-200 p-6 text-center">
-        {suspImg ? (
-          <img src={suspImg} alt="Tienda suspendida" className="max-w-md w-full rounded-3xl border border-white/10 mb-6" referrerPolicy="no-referrer" />
-        ) : (
-          <div className="w-20 h-20 rounded-3xl bg-white/5 border border-white/10 flex items-center justify-center text-3xl mb-6">⏸</div>
-        )}
-        <h1 className="text-xl font-bold text-white">{webSettings.nombreWeb || "Magxor Engine"}</h1>
-        <p className="text-sm text-slate-400 mt-2 max-w-sm">{suspMsg || "Tienda temporalmente inhabilitada."}</p>
-      </div>
-    );
+    if (suspImg || suspMsg) {
+      return (
+        <div className="font-sans min-h-screen flex flex-col items-center justify-center bg-[#0A0A0A] text-slate-200 p-6 text-center">
+          {suspImg ? (
+            <img src={suspImg} alt="Tienda suspendida" className="max-w-md w-full rounded-3xl border border-white/10 mb-6" referrerPolicy="no-referrer" />
+          ) : (
+            <div className="w-20 h-20 rounded-3xl bg-white/5 border border-white/10 flex items-center justify-center text-3xl mb-6">⏸</div>
+          )}
+          <h1 className="text-xl font-bold text-white">{webSettings.nombreWeb || "Magxor Engine"}</h1>
+          <p className="text-sm text-slate-400 mt-2 max-w-sm">{suspMsg || "Tienda temporalmente inhabilitada."}</p>
+        </div>
+      );
+    }
+    // Suspensión "silenciosa" (sin imagen ni mensaje): la tienda se sigue
+    // viendo como vidriera, pero muda: sin WhatsApp, consultas, reseñas,
+    // newsletter ni envío de carritos (se bloquean abajo en cada superficie
+    // y los intentos de checkout quedan como carrito_perdido en AUDIT_LOG).
   }
 
   return (
@@ -1073,7 +1080,9 @@ export default function App() {
         webSettings={webSettings}
       />
 
-      <WelcomePopup onCapturePhone={handleSubscribeNewsletter} nombreWeb={webSettings.nombreWeb} />
+      {!isTiendaBloqueada && (
+        <WelcomePopup onCapturePhone={handleSubscribeNewsletter} nombreWeb={webSettings.nombreWeb} />
+      )}
       <Splash
         logoAnimadoUrl={String(webSettings.logoAnimadoUrl || "")}
         nombreWeb={String(webSettings.nombreWeb || "Magxor Engine")}
@@ -1107,6 +1116,7 @@ export default function App() {
           reviews={reviews}
           onAddReview={handleAddReview}
           nombreWeb={webSettings.nombreWeb}
+          bloqueada={isTiendaBloqueada}
         />
       )}
 

@@ -11,6 +11,8 @@ interface ProductDetailProps {
   reviews: ReviewItem[];
   onAddReview: (productId: string, name: string, rating: number, comment: string) => void;
   nombreWeb?: string;
+  // true con la cuenta suspendida: oculta las vías de contacto (WhatsApp)
+  bloqueada?: boolean;
 }
 
 export default function ProductDetailModal({
@@ -19,7 +21,8 @@ export default function ProductDetailModal({
   onAddToCart,
   reviews = [],
   onAddReview,
-  nombreWeb = "Magxor Engine"
+  nombreWeb = "Magxor Engine",
+  bloqueada = false
 }: ProductDetailProps) {
   const [activeImage, setActiveImage] = useState(product.image || "https://placehold.co/450?text=Sin+Imagen");
   const [quantity, setQuantity] = useState(1);
@@ -308,6 +311,7 @@ export default function ProductDetailModal({
                   Compartir:
                 </span>
                 
+                {!bloqueada && (
                 <button
                   onClick={handleShareWhatsApp}
                   className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600/15 border border-emerald-500/20 hover:bg-emerald-600/25 text-emerald-400 text-xs font-bold rounded-xl transition-all cursor-pointer hover:scale-103 active:scale-97"
@@ -318,6 +322,7 @@ export default function ProductDetailModal({
                   </svg>
                   <span>WhatsApp</span>
                 </button>
+                )}
 
                 <button
                   onClick={handleCopyLink}

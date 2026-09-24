@@ -32,6 +32,7 @@ El Sheet queda **privado** (Restringido). Solo este script lo lee.
 
 ## 5. Control maestro de cuenta (DATOS)
 - `ESTADO_CUENTA`: `SI` (normal) | `ATRASO` (tienda visible + aviso de pago, admin entra con alerta) | `NO` (tienda y login suspendidos).
-- Con `NO`, la web muestra pantalla de suspensión con `SUSPENSION_IMAGE_URL` y/o `SUSPENSION_MENSAJE`; si ambos están vacíos se muestra un aviso neutro sin vías de contacto (sin WhatsApp, formularios ni carrito). El endpoint rechaza pedidos/reseñas (clientes de newsletter sí se aceptan).
+- Con `NO` y `SUSPENSION_IMAGE_URL` y/o `SUSPENSION_MENSAJE` cargados: pantalla de suspensión completa con ese contenido.
+- Con `NO` y ambas celdas vacías: la tienda se sigue viendo como vidriera pero queda **muda**: sin botones de WhatsApp, sin contacto/horarios, sin reseñas, sin newsletter y sin envío de carritos (los intentos de checkout se registran como carritos perdidos). El endpoint igualmente rechaza pedidos/reseñas (clientes de newsletter sí se aceptan).
 - **Carritos perdidos**: todo intento de pedido bloqueado por estado `NO`/`ATRASO` queda en `AUDIT_LOG` como `carrito_perdido` con cliente, teléfono, productos, total y entrega. El checkout bloqueado en el navegador se registra con la acción pública `logLostCart` (no crea pedidos).
 - Acciones endpoint: `health, getConfig, getProducts, getReviews, addOrder, addReview, addClient` (+ admin con `session`: `sessionPing, listOrders, listClients, updateOrderStatus, updateOrderDetail, deleteOrder, updateClientContact, deleteClient, add/update/delete Product, updateConfig, changeCredentials, verifyAdminPass, listUsers, createUser, deleteUser, updateUser` — gestión de usuarios requiere además `adminPass`).
